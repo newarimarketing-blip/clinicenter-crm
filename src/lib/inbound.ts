@@ -58,13 +58,15 @@ async function handleOutgoing(d: any, phone: string) {
 export async function processWebhook(body: any) {
   const d = body?.data;
   const phone = resolvePhone(d);
+  // diagnóstico sem dados pessoais: só o tipo de JID e flags (nunca número ou texto)
+  console.log("webhook", { event: body?.event, instance: body?.instance, jid: (d?.key?.remoteJid ?? "").split("@")[1] ?? null, alt: !!d?.key?.remoteJidAlt, fromMe: !!d?.key?.fromMe, tipo: d?.messageType, temNumero: !!phone });
   if (!d || !phone) return;
   if (d.key.fromMe) return handleOutgoing(d, phone);
 
   const db = admin();
   const lead = await upsertLead(phone, d.pushName);
   const { text, media } = await resolveContent(d);
-  if (!text.trim()) return;
+  if (!text.trim()) return console.log("webhook ignorado: sem texto", d.messageType);
 
   // idempotência: o Evolution pode reenviar o mesmo webhook
   const { data: inserted } = await db
