@@ -16,8 +16,10 @@ export async function middleware(req: NextRequest) {
       },
     },
   });
-  const { data } = await supabase.auth.getUser();
-  if (!data.user && !req.nextUrl.pathname.startsWith("/login")) {
+  // getSession lê o cookie localmente (sem ida ao Supabase a cada clique). Os dados continuam
+  // protegidos por RLS e as ações do servidor revalidam o usuário com getUser().
+  const { data } = await supabase.auth.getSession();
+  if (!data.session && !req.nextUrl.pathname.startsWith("/login")) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
