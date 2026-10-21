@@ -15,7 +15,9 @@ export function Thread({ leadId, initial, live }: { leadId: string; initial: Mes
   const [msgs, setMsgs] = useState(initial);
   const end = useRef<HTMLDivElement>(null);
 
-  useEffect(() => setMsgs(initial), [initial]);
+  useEffect(() => {
+    setMsgs(initial);
+  }, [initial]);
 
   useEffect(() => {
     if (!live) return;
@@ -27,11 +29,15 @@ export function Thread({ leadId, initial, live }: { leadId: string; initial: Mes
       )
       .subscribe();
     return () => {
-      sb.removeChannel(ch);
+      try {
+        void sb.removeChannel(ch);
+      } catch {}
     };
   }, [leadId, live]);
 
-  useEffect(() => end.current?.scrollIntoView({ behavior: "smooth" }), [msgs.length]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ behavior: "smooth" });
+  }, [msgs.length]);
 
   return (
     <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-4">
