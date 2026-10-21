@@ -10,9 +10,11 @@ export const dynamic = "force-dynamic";
 
 export default async function Conversas({ searchParams }: { searchParams: Promise<{ lead?: string }> }) {
   const { lead: sel } = await searchParams;
-  const leads = (await getLeads()).filter((l) => l.last_message_at);
+  // com ?lead= já na URL, busca lista e mensagens ao mesmo tempo
+  const [allLeads, early] = await Promise.all([getLeads(), sel ? getMessages(sel) : Promise.resolve(null)]);
+  const leads = allLeads.filter((l) => l.last_message_at);
   const current = leads.find((l) => l.id === sel) ?? leads[0];
-  const messages = current ? await getMessages(current.id) : [];
+  const messages = !current ? [] : early && current.id === sel ? early : await getMessages(current.id);
   const paused = current ? isPaused(current.ai_paused_until) : false;
 
   return (
