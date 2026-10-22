@@ -6,7 +6,9 @@ import { sendText } from "@/lib/evolution";
 import { runLearning } from "@/lib/learn";
 import { generateWeeklyReport } from "@/lib/report";
 import { admin } from "@/lib/supabase-admin";
-import { getClinicSettings, invalidateClinicSettings, parseInsurance, parseWindows, pricesSchema } from "@/lib/clinic-settings";
+import { getClinicSettings, invalidateClinicSettings, parseInsurance, parseWindows, slugKey } from "@/lib/clinic-settings";
+import { createProfessionalCalendar } from "@/lib/agenda";
+import { currentMe } from "@/lib/roles";
 import { CLINIC, type Stage } from "@/lib/clinic-config";
 
 async function requireUser() {
@@ -92,9 +94,17 @@ export async function markAttendance(appointmentId: string, result: Attendance) 
 
 const back = (q: string): never => redirect(`/configuracoes?${q}`);
 
-async function persistSetting(key: "prices" | "insurance" | "professionals", value: unknown) {
+/** Só gestor altera configurações (a recepção apenas visualiza). */
+async function gestorOnly() {
   const ctx = await requireUser();
   if (!ctx) return back("erro=" + encodeURIComponent("Modo demonstração: nada é salvo."));
+  const me = await currentMe();
+  if (me.role !== "gestor") return back("erro=" + encodeURIComponent("Somente o gestor pode alterar as configurações."));
+  return ctx;
+}
+
+async function persistSetting(key: "prices" | "insurance" | "professionals", value: unknown) {
+  const ctx = await gestorOnly();
   const { error } = await ctx.db.from("clinic_settings").upsert({ key, value, updated_at: new Date().toISOString(), updated_by: ctx.user.id });
   if (error) {
     const msg = /clinic_settings|relation|schema cache/i.test(error.message) ? "A tabela clinic_settings ainda não existe: rode a migração 004 no Supabase." : error.message;
@@ -105,49 +115,17 @@ async function persistSetting(key: "prices" | "insurance" | "professionals", val
   return back(`ok=${key}`);
 }
 
-export async function savePrices(formData: FormData) {
-  const lines = String(formData.get("prices") ?? "").split("\n").map((l) => l.trim()).filter(Boolean);
-  const r = pricesSchema.safeParse(lines);
-  if (!r.success) return back("erro=" + encodeURIComponent("Informe de 1 a 30 linhas de preço (até 240 caracteres cada)."));
-  return persistSetting("prices", r.data);
-}
-
 export async function saveInsurance(formData: FormData) {
   const r = parseInsurance(String(formData.get("insurance") ?? ""));
   if (!r.ok) return back("erro=" + encodeURIComponent(r.error));
   return persistSetting("insurance", r.value);
 }
 
-/** Salva a grade de UM profissional (os demais são mantidos como estão hoje). */
-export async function saveProfessional(formData: FormData) {
-  const key = String(formData.get("key") ?? "");
-  const cfg = await getClinicSettings();
-  const cur = cfg.professionals.find((p) => p.key === key);
-  if (!cur) return back("erro=" + encodeURIComponent("Profissional desconhecido."));
-  const name = String(formData.get("name") ?? "").trim();
-  const slotMin = Number(formData.get("slotMin"));
-  if (name.length < 2 || name.length > 80) return back("erro=" + encodeURIComponent("Informe o nome do profissional."));
-  if (!Number.isInteger(slotMin) || slotMin < 10 || slotMin > 180) return back("erro=" + encodeURIComponent("A duração da consulta deve ficar entre 10 e 180 minutos."));
-  const schedule: Record<string, [string, string][]> = {};
-  for (let d = 0; d < 7; d++) {
-    const w = parseWindows(String(formData.get(`dow${d}`) ?? ""));
-    if (!w.ok) return back("erro=" + encodeURIComponent(`${cur.name}: ${w.error}`));
-    if (w.value.length) schedule[String(d)] = w.value;
-  }
-  const all = cfg.professionals.map((p) =>
-    p.key === key
-      ? { key, name, slotMin, particularOnly: formData.get("particularOnly") === "on", schedule }
-      : { key: p.key, name: p.name, slotMin: p.slotMin, particularOnly: p.particularOnly, schedule: Object.fromEntries(Object.entries(p.schedule).map(([d, w]) => [d, w])) },
-  );
-  return persistSetting("professionals", all);
-}
-
 /** Volta uma seção aos valores padrão do sistema (apaga só a personalização). */
 export async function restoreDefaults(formData: FormData) {
   const key = String(formData.get("section") ?? "");
   if (!["prices", "insurance", "professionals"].includes(key)) return;
-  const ctx = await requireUser();
-  if (!ctx) return;
+  const ctx = await gestorOnly();
   await ctx.db.from("clinic_settings").delete().eq("key", key);
   invalidateClinicSettings();
   revalidatePath("/configuracoes");
@@ -165,4 +143,152 @@ export async function generateReportNow() {
   }
   revalidatePath("/relatorios");
   redirect("/relatorios");
+}
+
+/* ---------- Profissionais, serviços e equipe (somente gestor) ---------- */
+
+const err = (m: string) => back("erro=" + encodeURIComponent(m));
+const TABLE_MSG = "As tabelas novas ainda não existem: rode a migração 006 no Supabase.";
+
+function readSchedule(formData: FormData, who: string): Record<string, [string, string][]> {
+  const schedule: Record<string, [string, string][]> = {};
+  for (let d = 0; d < 7; d++) {
+    const w = parseWindows(String(formData.get(`dow${d}`) ?? ""));
+    if (!w.ok) return err(`${who}: ${w.error}`);
+    if (w.value.length) schedule[String(d)] = w.value;
+  }
+  return schedule;
+}
+
+const normSpecialty = (v: FormDataEntryValue | null) => String(v ?? "").trim().toLowerCase();
+
+function shareEmails(): string[] {
+  return (process.env.CALENDAR_SHARE_EMAILS || "clinicenter.mkt@gmail.com,newarimarketing@gmail.com").split(",").map((e) => e.trim()).filter(Boolean);
+}
+
+/** Cadastra um especialista (e, se marcado, cria a agenda dele no Google Calendar da clínica). */
+export async function createProfessional(formData: FormData) {
+  await gestorOnly();
+  const cfg = await getClinicSettings();
+  if (!cfg.tables.professionals) return err(TABLE_MSG);
+  const name = String(formData.get("name") ?? "").trim();
+  const specialty = normSpecialty(formData.get("specialty"));
+  const slotMin = Number(formData.get("slotMin"));
+  if (name.length < 2 || name.length > 80) return err("Informe o nome do especialista.");
+  if (specialty.length < 3 || specialty.length > 40) return err("Informe a especialidade (3 a 40 letras).");
+  if (!Number.isInteger(slotMin) || slotMin < 10 || slotMin > 180) return err("A duração da consulta deve ficar entre 10 e 180 minutos.");
+  const schedule = readSchedule(formData, name);
+
+  const taken = new Set(cfg.professionalsAll.map((p) => p.key));
+  const base = slugKey(name);
+  let key = base;
+  for (let i = 2; taken.has(key); i++) key = `${base}${i}`;
+
+  let calendar_id: string | null = null;
+  let aviso = "";
+  if (formData.get("criarAgenda") === "on") {
+    try {
+      const cal = await createProfessionalCalendar(name, shareEmails());
+      calendar_id = cal.id;
+      aviso = cal.warning ?? "";
+    } catch (e) {
+      return err(`Não consegui criar a agenda no Google Calendar (${String(e).slice(0, 160)}). Nada foi cadastrado; tente de novo ou desmarque "Criar agenda".`);
+    }
+  }
+  const { error } = await admin().from("professionals").insert({ key, name, specialty, slot_min: slotMin, particular_only: formData.get("particularOnly") === "on", schedule, calendar_id });
+  if (error) return err(error.message);
+  invalidateClinicSettings();
+  revalidatePath("/configuracoes");
+  revalidatePath("/agenda");
+  return back(`ok=prof-novo${aviso ? "&aviso=" + encodeURIComponent(aviso) : ""}`);
+}
+
+/** Edita nome, especialidade, duração, grade e situação (ativo) de um especialista. */
+export async function updateProfessional(formData: FormData) {
+  await gestorOnly();
+  const key = String(formData.get("key") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  const specialty = normSpecialty(formData.get("specialty"));
+  const slotMin = Number(formData.get("slotMin"));
+  if (name.length < 2 || name.length > 80) return err("Informe o nome do especialista.");
+  if (specialty.length < 3 || specialty.length > 40) return err("Informe a especialidade (3 a 40 letras).");
+  if (!Number.isInteger(slotMin) || slotMin < 10 || slotMin > 180) return err("A duração da consulta deve ficar entre 10 e 180 minutos.");
+  const schedule = readSchedule(formData, name);
+  const { error } = await admin().from("professionals").update({ name, specialty, slot_min: slotMin, particular_only: formData.get("particularOnly") === "on", schedule, active: formData.get("active") === "on" }).eq("key", key);
+  if (error) return err(/relation|schema cache/i.test(error.message) ? TABLE_MSG : error.message);
+  invalidateClinicSettings();
+  revalidatePath("/configuracoes");
+  revalidatePath("/agenda");
+  return back("ok=professionals");
+}
+
+/** Cria a agenda do Google para um profissional que ainda não tem uma. */
+export async function createCalendarFor(formData: FormData) {
+  await gestorOnly();
+  const key = String(formData.get("key") ?? "");
+  const p = (await getClinicSettings()).professionalsAll.find((x) => x.key === key);
+  if (!p) return err("Profissional desconhecido.");
+  try {
+    const cal = await createProfessionalCalendar(p.name, shareEmails());
+    const { error } = await admin().from("professionals").update({ calendar_id: cal.id }).eq("key", key);
+    if (error) return err(error.message);
+    invalidateClinicSettings();
+    revalidatePath("/configuracoes");
+    return back(`ok=agenda-criada${cal.warning ? "&aviso=" + encodeURIComponent(cal.warning) : ""}`);
+  } catch (e) {
+    return err(`Não consegui criar a agenda: ${String(e).slice(0, 160)}`);
+  }
+}
+
+/** Cadastra ou edita um serviço (nome, valor, especialidade, profissional). */
+export async function saveService(formData: FormData) {
+  await gestorOnly();
+  const id = String(formData.get("id") ?? "");
+  const name = String(formData.get("name") ?? "").trim();
+  const price = String(formData.get("price") ?? "").trim();
+  const specialty = normSpecialty(formData.get("specialty")) || null;
+  const professional_key = String(formData.get("professional_key") ?? "") || null;
+  const note = String(formData.get("note") ?? "").trim() || null;
+  if (name.length < 2 || name.length > 80) return err("Informe o nome do serviço.");
+  if (!price || price.length > 60) return err("Informe o valor (ex.: R$ 220,00).");
+  const row = { name, price, specialty, professional_key, note, particular_only: formData.get("particularOnly") === "on", active: id ? formData.get("active") === "on" : true };
+  const q = id ? admin().from("services").update(row).eq("id", id) : admin().from("services").insert({ ...row, sort: Date.now() % 1000000 });
+  const { error } = await q;
+  if (error) return err(/relation|schema cache/i.test(error.message) ? TABLE_MSG : error.message);
+  invalidateClinicSettings();
+  revalidatePath("/configuracoes");
+  return back(`ok=${id ? "servico" : "servico-novo"}`);
+}
+
+export async function deleteService(formData: FormData) {
+  await gestorOnly();
+  const { error } = await admin().from("services").delete().eq("id", String(formData.get("id") ?? ""));
+  if (error) return err(error.message);
+  invalidateClinicSettings();
+  revalidatePath("/configuracoes");
+  return back("ok=servico-removido");
+}
+
+/** Define o papel (gestor/recepção) de um e-mail. O usuário precisa existir no Supabase Auth para conseguir entrar. */
+export async function setRole(formData: FormData) {
+  await gestorOnly();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const role = String(formData.get("role") ?? "");
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err("E-mail inválido.");
+  if (role !== "gestor" && role !== "recepcao") return err("Papel inválido.");
+  const me = await currentMe();
+  if (email === me.email && role !== "gestor") return err("Você não pode tirar o seu próprio acesso de gestor.");
+  const { error } = await admin().from("user_roles").upsert({ email, role });
+  if (error) return err(/relation|schema cache/i.test(error.message) ? TABLE_MSG : error.message);
+  revalidatePath("/configuracoes");
+  return back("ok=papel");
+}
+
+/** Notas internas da equipe na ficha do lead (qualquer usuário logado). */
+export async function saveLeadNotes(leadId: string, formData: FormData) {
+  const ctx = await requireUser();
+  if (!ctx) return;
+  const notes = String(formData.get("notes") ?? "").slice(0, 4000);
+  await ctx.db.from("leads").update({ notes: notes || null }).eq("id", leadId);
+  revalidatePath("/funil");
 }
