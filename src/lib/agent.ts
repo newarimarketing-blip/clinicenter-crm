@@ -5,7 +5,7 @@ import { openai } from "./openai";
 import { sendText, typingDelay } from "./evolution";
 import { splitMessage } from "./split";
 import { DEFAULT_SCRIPT } from "./default-script";
-import { CLINIC, factsBlock, PROFESSIONALS, SPECIALTIES, STAGES } from "./clinic-config";
+import { CLINIC, factsBlock, STAGES } from "./clinic-config";
 import { activeAppointment, cancelById, cancelLatest, confirmAppointment, createAppointment, freeSlots, resolveSlot, upcomingAppointments } from "./agenda";
 import { getClinicSettings, type ClinicSettings } from "./clinic-settings";
 import { advanceStage, logEvent, updateLead } from "./leads";
@@ -14,9 +14,7 @@ import type { Lead, Message } from "./types";
 
 const HISTORY_LIMIT = 40;
 const MAX_STEPS = 6;
-const keys = PROFESSIONALS.map((p) => p.key) as [string, ...string[]];
-
-const tools: ChatCompletionTool[] = [
+const buildTools = (keys: [string, ...string[]], specialties: string[]): ChatCompletionTool[] => [
   {
     type: "function",
     function: {
@@ -87,7 +85,7 @@ const tools: ChatCompletionTool[] = [
       parameters: {
         type: "object",
         properties: {
-          specialty: { type: "string", enum: [...SPECIALTIES] },
+          specialty: { type: "string", enum: specialties },
           insurance: { type: "string", description: "Nome do convênio ou 'particular'" },
           patient_name: { type: "string" },
           stage: { type: "string", enum: [...STAGES] },
@@ -110,7 +108,7 @@ const tools: ChatCompletionTool[] = [
 ];
 
 const updateSchema = z.object({
-  specialty: z.enum(SPECIALTIES).optional(),
+  specialty: z.string().max(60).optional(),
   insurance: z.string().optional(),
   patient_name: z.string().optional(),
   stage: z.enum(STAGES).optional(),
@@ -227,6 +225,8 @@ export async function runAgent(leadId: string): Promise<void> {
       `Se disser que NÃO pode ir ou pedir outro horário: seja acolhedora, chame consultar_horarios, ofereça até 3 opções e, quando escolher, use reagendar_consulta (o horário antigo volta sozinho para a agenda). Se desistir de vez, use cancelar_consulta e deixe a porta aberta para voltar.`
     : "";
 
+  const keys = (cfg.professionals.length ? cfg.professionals.map((p) => p.key) : ["nenhum"]) as [string, ...string[]];
+  const tools = buildTools(keys, [...cfg.specialties, "outra"]);
   const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock }, ...toChat(history)];
   let reply = "";
 

@@ -7,11 +7,12 @@ export type TimeWindow = [string, string]; // ["15:00","17:00"]
 export type Professional = {
   key: string; // calendar_hint
   name: string;
-  specialty: "pediatria" | "psiquiatria" | "fisioterapia";
+  specialty: string;
   slotMin: number;
   /** dia da semana (0=domingo) -> janelas */
   schedule: Record<number, TimeWindow[]>;
-  calEnv: string; // nome da env com o ID do Google Calendar
+  calEnv?: string; // nome da env com o ID do Google Calendar (profissionais antigos)
+  calendarId?: string; // ID do Google Calendar guardado no banco (profissionais cadastrados no CRM)
   particularOnly?: boolean;
 };
 
@@ -54,6 +55,7 @@ export const INSURANCE: Record<string, string[]> = {
 };
 
 export const SPECIALTIES = ["pediatria", "psiquiatria", "fisioterapia", "outra"] as const;
+export const BASE_SPECIALTIES = ["pediatria", "psiquiatria", "fisioterapia"];
 export const STAGES = ["novo", "qualificado", "horario_oferecido", "agendado", "compareceu", "perdido"] as const;
 export type Stage = (typeof STAGES)[number];
 

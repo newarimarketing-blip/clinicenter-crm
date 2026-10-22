@@ -1,5 +1,6 @@
 import { google } from "googleapis";
-import { CLINIC, PROFESSIONALS, profByKey, type Professional } from "./clinic-config";
+import { CLINIC, type Professional } from "./clinic-config";
+import { getClinicSettings } from "./clinic-settings";
 import { admin } from "./supabase-admin";
 
 export type Slot = { startTime: string; endTime: string; label: string };
@@ -16,7 +17,7 @@ function addMin(hm: string, min: number) {
   return `${pad(Math.floor(t / 60))}:${pad(t % 60)}`;
 }
 
-function calendarClient() {
+export function calendarClient() {
   const b64 = process.env.GOOGLE_SERVICE_ACCOUNT_B64;
   if (!b64) return null;
   const credentials = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
@@ -24,7 +25,8 @@ function calendarClient() {
   return google.calendar({ version: "v3", auth });
 }
 
-const calendarId = (p: Professional) => process.env[p.calEnv];
+export const calendarId = (p: Professional) => p.calendarId ?? (p.calEnv ? process.env[p.calEnv] : undefined);
+const findProf = async (key: string) => (await getClinicSettings()).professionals.find((p) => p.key === key);
 
 type Interval = { start: number; end: number };
 
@@ -150,7 +152,7 @@ type Appt = { id: string; professional: string; calendar_hint: string; starts_at
 
 export async function cancelById(appt: Appt, status: "cancelado" | "remarcado" = "cancelado") {
   const cal = calendarClient();
-  const p = profByKey(appt.calendar_hint);
+  const p = await findProf(appt.calendar_hint);
   const id = p ? calendarId(p) : undefined;
   if (cal && id && appt.gcal_event_id) await cal.events.delete({ calendarId: id, eventId: appt.gcal_event_id }).catch(() => {});
   await admin().from("appointments").update({ status }).eq("id", appt.id);
@@ -163,7 +165,8 @@ async function cancelFromGoogle(leadId: string, calendarHint?: string) {
   if (!cal) return null;
   const { data: lead } = await admin().from("leads").select("phone").eq("id", leadId).single();
   if (!lead) return null;
-  const targets = calendarHint ? [profByKey(calendarHint)].filter(Boolean) as Professional[] : PROFESSIONALS;
+  const all = (await getClinicSettings()).professionals;
+  const targets = calendarHint ? all.filter((x) => x.key === calendarHint) : all;
   for (const p of targets) {
     const id = calendarId(p);
     if (!id) continue;
@@ -183,8 +186,6 @@ export async function activeAppointment(leadId: string, calendarHint: string) {
   return (data?.[0] ?? null) as Appt | null;
 }
 
-export const allProfessionalKeys = PROFESSIONALS.map((p) => p.key);
-
 export type UpcomingAppt = Appt & { confirmed_at: string | null; reminder_sent_at: string | null };
 
 /** Consultas futuras ativas do lead (contexto do agente). Tolera migração 002 ainda não aplicada. */
@@ -201,4 +202,41 @@ export async function confirmAppointment(leadId: string, calendarHint?: string) 
   if (!appt) return null;
   await admin().from("appointments").update({ confirmed_at: new Date().toISOString() }).eq("id", appt.id); // sem a migração 002 apenas não grava
   return appt as Appt;
+}
+
+/** Cria uma agenda nova no Google Calendar (conta de serviço) e compartilha com a equipe como proprietária. */
+export async function createProfessionalCalendar(name: string, shareWith: string[]): Promise<{ id: string; shared: string[]; warning?: string }> {
+  const cal = calendarClient();
+  if (!cal) throw new Error("Google Calendar não configurado (GOOGLE_SERVICE_ACCOUNT_B64).");
+  const created = await cal.calendars.insert({ requestBody: { summary: name, timeZone: CLINIC.tz, description: "Agenda criada pelo CRM Clinicenter" } });
+  const id = created.data.id;
+  if (!id) throw new Error("O Google não devolveu o ID da agenda.");
+  const shared: string[] = [];
+  const failed: string[] = [];
+  for (const email of shareWith) {
+    try {
+      await cal.acl.insert({ calendarId: id, sendNotifications: true, requestBody: { role: "owner", scope: { type: "user", value: email } } });
+      shared.push(email);
+    } catch {
+      failed.push(email);
+    }
+  }
+  return { id, shared, warning: failed.length ? `Agenda criada, mas não consegui compartilhar com: ${failed.join(", ")}.` : undefined };
+}
+
+export type GEvent = { id: string; start: string; end: string; title: string };
+
+/** Eventos do Google de um profissional em um intervalo (agenda real, inclui o que a equipe criou à mão). */
+export async function googleEvents(p: Professional, from: Date, to: Date): Promise<GEvent[]> {
+  const cal = calendarClient();
+  const id = calendarId(p);
+  if (!cal || !id) return [];
+  try {
+    const r = await cal.events.list({ calendarId: id, timeMin: from.toISOString(), timeMax: to.toISOString(), singleEvents: true, orderBy: "startTime", maxResults: 250 });
+    return (r.data.items ?? [])
+      .filter((e) => e.status !== "cancelled" && e.start?.dateTime && e.end?.dateTime)
+      .map((e) => ({ id: e.id ?? "", start: e.start!.dateTime!, end: e.end!.dateTime!, title: e.summary ?? "(sem título)" }));
+  } catch {
+    return [];
+  }
 }
