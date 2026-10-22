@@ -216,7 +216,13 @@ export async function runAgent(leadId: string): Promise<void> {
   const system =
     `${script.prompt}\n\n${factsBlock(todayLabel(), cfg)}${guidanceBlock(cfg)}\n\n# CONTEXTO DO LEAD (CRM)\n` +
     `Nome no WhatsApp: ${lead.name ?? "?"} | Paciente: ${lead.patient_name ?? "?"} | Especialidade: ${lead.specialty ?? "?"} | Convênio: ${lead.insurance ?? "?"} | Etapa: ${lead.stage}\n` +
-    `Se o paciente pedir para não receber mais mensagens ou disser que não tem interesse, agradeça com educação, registre stage=perdido com lost_reason "pediu para parar" e não insista.`;
+    `Se o paciente pedir para não receber mais mensagens ou disser que não tem interesse, agradeça com educação, registre stage=perdido com lost_reason "pediu para parar" e não insista.\n\n` +
+    `# REGRAS DE AGENDAMENTO (valem sempre)\n` +
+    `- A escolha de horário vale pela ÚLTIMA mensagem do paciente. Interprete pedidos informais ("dia 28 às 15", "28/10, 15hr" = 15:00) e ligue-os ao startTime exato devolvido pela última consultar_horarios. Se houver dúvida real entre dois horários, pergunte qual.\n` +
+    `- Escolhido o horário e sabendo o nome do paciente, chame agendar_consulta NA HORA. O e-mail é opcional: nunca peça e-mail antes de tentar agendar (se quiser, peça depois de agendado).\n` +
+    `- Nunca diga que um horário está disponível/confirmado sem ter chamado consultar_horarios ou agendar_consulta nesta mesma rodada.\n` +
+    `- Se o horário escolhido não estiver mais livre, diga com clareza que ele acabou de ser ocupado e ofereça só as opções novas e atuais (nunca repita a lista antiga nem a mesma pergunta duas vezes seguidas).\n` +
+    `- Se o paciente responder "pode ser", "ok" ou "sim" a UMA proposta sua de horário, agende exatamente esse horário.`;
 
   const upcoming = await upcomingAppointments(leadId);
   const apptBlock = upcoming.length
