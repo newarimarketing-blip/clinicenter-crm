@@ -215,3 +215,15 @@ export function parseInsurance(text: string): { ok: true; value: Record<string, 
   const r = insuranceSchema.safeParse(out);
   return r.success ? { ok: true, value: r.data } : { ok: false, error: "convênios inválidos (nomes até 60 caracteres)" };
 }
+
+/** Áreas ativas hoje (uma linha por especialidade, com os profissionais), usadas na saudação da Marcelia. */
+export function areasBlock(cfg: Pick<ClinicSettings, "professionals">): string {
+  const by = new Map<string, string[]>();
+  for (const p of cfg.professionals) {
+    const k = p.specialty.trim().toLowerCase();
+    by.set(k, [...(by.get(k) ?? []), p.name]);
+  }
+  if (!by.size) return "- (nenhum profissional ativo: diga que vai verificar com a equipe)";
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+  return [...by.entries()].map(([sp, names]) => `- ${cap(sp)} (${names.join(", ")})`).join("\n");
+}
