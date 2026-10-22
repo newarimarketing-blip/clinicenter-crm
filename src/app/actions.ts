@@ -160,6 +160,7 @@ function readSchedule(formData: FormData, who: string): Record<string, [string, 
   return schedule;
 }
 
+const guidanceOf = (f: FormData) => String(f.get("guidance") ?? "").trim().slice(0, 1200) || null;
 const normSpecialty = (v: FormDataEntryValue | null) => String(v ?? "").trim().toLowerCase();
 
 function shareEmails(): string[] {
@@ -195,7 +196,7 @@ export async function createProfessional(formData: FormData) {
       return err(`Não consegui criar a agenda no Google Calendar (${String(e).slice(0, 160)}). Nada foi cadastrado; tente de novo ou desmarque "Criar agenda".`);
     }
   }
-  const { error } = await admin().from("professionals").insert({ key, name, specialty, slot_min: slotMin, particular_only: formData.get("particularOnly") === "on", schedule, calendar_id });
+  const { error } = await admin().from("professionals").insert({ key, name, specialty, slot_min: slotMin, particular_only: formData.get("particularOnly") === "on", schedule, calendar_id, guidance: guidanceOf(formData) });
   if (error) return err(error.message);
   invalidateClinicSettings();
   revalidatePath("/configuracoes");
@@ -214,7 +215,7 @@ export async function updateProfessional(formData: FormData) {
   if (specialty.length < 3 || specialty.length > 40) return err("Informe a especialidade (3 a 40 letras).");
   if (!Number.isInteger(slotMin) || slotMin < 10 || slotMin > 180) return err("A duração da consulta deve ficar entre 10 e 180 minutos.");
   const schedule = readSchedule(formData, name);
-  const { error } = await admin().from("professionals").update({ name, specialty, slot_min: slotMin, particular_only: formData.get("particularOnly") === "on", schedule, active: formData.get("active") === "on" }).eq("key", key);
+  const { error } = await admin().from("professionals").update({ name, specialty, slot_min: slotMin, particular_only: formData.get("particularOnly") === "on", schedule, active: formData.get("active") === "on", guidance: guidanceOf(formData) }).eq("key", key);
   if (error) return err(/relation|schema cache/i.test(error.message) ? TABLE_MSG : error.message);
   invalidateClinicSettings();
   revalidatePath("/configuracoes");
@@ -251,7 +252,7 @@ export async function saveService(formData: FormData) {
   const note = String(formData.get("note") ?? "").trim() || null;
   if (name.length < 2 || name.length > 80) return err("Informe o nome do serviço.");
   if (!price || price.length > 60) return err("Informe o valor (ex.: R$ 220,00).");
-  const row = { name, price, specialty, professional_key, note, particular_only: formData.get("particularOnly") === "on", active: id ? formData.get("active") === "on" : true };
+  const row = { name, price, specialty, professional_key, note, guidance: guidanceOf(formData), particular_only: formData.get("particularOnly") === "on", active: id ? formData.get("active") === "on" : true };
   const q = id ? admin().from("services").update(row).eq("id", id) : admin().from("services").insert({ ...row, sort: Date.now() % 1000000 });
   const { error } = await q;
   if (error) return err(/relation|schema cache/i.test(error.message) ? TABLE_MSG : error.message);
