@@ -83,6 +83,7 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
                 <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" name="particularOnly" disabled={lock} /> Somente particular</label>
                 <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" name="criarAgenda" defaultChecked disabled={lock} /> Criar agenda no Google Calendar</label>
               </div>
+              <label className="block text-xs text-muted">Orientações para a Marcelia (opcional)<textarea name="guidance" rows={3} placeholder="O que ela pode explicar: quem atende, o que a consulta trata, preparo, documentos, idade, regras…" disabled={lock} className={`${input} mt-1`} /></label>
               <ScheduleFields disabled={lock} />
               <p className="text-xs text-muted">A agenda nova é criada na conta do sistema e compartilhada (como proprietária) com clinicenter.mkt@gmail.com e newarimarketing@gmail.com. O Google envia um convite por e-mail para aceitar.</p>
               <button className="btn btn-primary" disabled={lock}>Cadastrar especialista</button>
@@ -109,6 +110,7 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
                   <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" name="particularOnly" defaultChecked={!!p.particularOnly} disabled={lock} /> Somente particular</label>
                   <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" name="active" defaultChecked={p.active} disabled={lock} /> Ativo (Marcelia oferece horários)</label>
                 </div>
+                <label className="block text-xs text-muted">Orientações para a Marcelia<textarea name="guidance" rows={3} defaultValue={p.guidance ?? ""} placeholder="O que ela pode explicar: o que a consulta trata, preparo, documentos, regras…" disabled={lock} className={`${input} mt-1`} /></label>
                 <ScheduleFields p={p} disabled={lock} />
                 {edit && (
                   <div className="flex flex-wrap gap-2">
@@ -141,6 +143,7 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
                 </select>
               </label>
               <label className="block text-xs text-muted sm:col-span-2">Observação (opcional)<input name="note" placeholder="Unimed: R$ 150,00 mediante carteirinha" disabled={lock} className={`${input} mt-1`} /></label>
+              <label className="block text-xs text-muted sm:col-span-2">Orientações para a Marcelia (opcional)<textarea name="guidance" rows={2} placeholder="Ex.: sessão de 60 min, trazer roupa confortável, não precisa de pedido médico" disabled={lock} className={`${input} mt-1`} /></label>
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="particularOnly" disabled={lock} /> Somente particular</label>
               <div className="sm:col-span-2"><button className="btn btn-primary" disabled={lock}>Cadastrar serviço</button></div>
             </form>
@@ -156,6 +159,7 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
               <label className="block text-xs text-muted">Valor<input name="price" defaultValue={s.price} disabled={lock} className={`${input} mt-1`} /></label>
               <label className="block text-xs text-muted">Especialidade<input name="specialty" list="specs" defaultValue={s.specialty ?? ""} disabled={lock} className={`${input} mt-1`} /></label>
               <label className="block text-xs text-muted">Observação<input name="note" defaultValue={s.note ?? ""} disabled={lock} className={`${input} mt-1`} /></label>
+              <label className="block text-xs text-muted sm:col-span-5">Orientações para a Marcelia<textarea name="guidance" rows={2} defaultValue={s.guidance ?? ""} disabled={lock} className={`${input} mt-1`} /></label>
               <div className="flex flex-wrap items-center gap-3 text-sm sm:col-span-5">
                 <label className="flex items-center gap-1.5"><input type="checkbox" name="particularOnly" defaultChecked={s.particular_only} disabled={lock} /> Somente particular</label>
                 <label className="flex items-center gap-1.5"><input type="checkbox" name="active" defaultChecked={s.active} disabled={lock} /> Ativo</label>

@@ -14,6 +14,8 @@ export type Professional = {
   calEnv?: string; // nome da env com o ID do Google Calendar (profissionais antigos)
   calendarId?: string; // ID do Google Calendar guardado no banco (profissionais cadastrados no CRM)
   particularOnly?: boolean;
+  /** orientações de atendimento (o que a Marcelia deve saber/dizer sobre este profissional) */
+  guidance?: string;
 };
 
 export const PROFESSIONALS: Professional[] = [
