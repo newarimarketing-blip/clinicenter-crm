@@ -12,6 +12,7 @@ export type Service = {
   particular_only: boolean;
   active: boolean;
   sort: number;
+  guidance?: string | null;
 };
 export type ProfessionalRow = Professional & { active: boolean };
 
@@ -71,6 +72,15 @@ export function serviceLine(s: Service, profs: Professional[]): string {
   return `${s.name}${who ? ` (${who})` : ""}: ${s.price}${extras ? ` — ${extras}` : ""}`;
 }
 
+/** Orientações de atendimento por profissional/serviço, injetadas no prompt da Marcelia. */
+export function guidanceBlock(cfg: Pick<ClinicSettings, "professionals" | "services">): string {
+  const lines: string[] = [];
+  for (const p of cfg.professionals) if (p.guidance) lines.push(`- ${p.name} (${p.specialty}): ${p.guidance.replace(/\s+/g, " ").trim()}`);
+  for (const s of cfg.services) if (s.active && s.guidance?.trim()) lines.push(`- Serviço "${s.name}": ${s.guidance.replace(/\s+/g, " ").trim()}`);
+  if (!lines.length) return "";
+  return `\n\n# ORIENTAÇÕES DE ATENDIMENTO POR ESPECIALIDADE (cadastradas pela clínica)\nUse apenas quando o paciente perguntar ou quando for relevante para agendar. Nunca invente nada além disto; se faltar informação, diga que vai confirmar com a equipe.\n${lines.join("\n")}`;
+}
+
 export const slugKey = (name: string) =>
   name
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
@@ -91,7 +101,7 @@ let cache: { at: number; value: ClinicSettings } | null = null;
 const TTL_MS = 30_000;
 export const invalidateClinicSettings = () => (cache = null);
 
-type ProfDbRow = { key: string; name: string; specialty: string; slot_min: number; particular_only: boolean; schedule: unknown; calendar_id: string | null; active: boolean };
+type ProfDbRow = { key: string; name: string; specialty: string; slot_min: number; particular_only: boolean; schedule: unknown; calendar_id: string | null; active: boolean; guidance?: string | null };
 
 function rowToProfessional(r: ProfDbRow): ProfessionalRow | null {
   const sch = scheduleSchema.safeParse(r.schedule ?? {});
@@ -105,6 +115,7 @@ function rowToProfessional(r: ProfDbRow): ProfessionalRow | null {
     specialty: r.specialty,
     slotMin: r.slot_min,
     particularOnly: r.particular_only,
+    guidance: r.guidance?.trim() || undefined,
     schedule,
     calendarId: r.calendar_id ?? undefined,
     calEnv: base?.calEnv,

@@ -7,7 +7,7 @@ import { splitMessage } from "./split";
 import { DEFAULT_SCRIPT } from "./default-script";
 import { CLINIC, factsBlock, STAGES } from "./clinic-config";
 import { activeAppointment, cancelById, cancelLatest, confirmAppointment, createAppointment, freeSlots, resolveSlot, upcomingAppointments } from "./agenda";
-import { getClinicSettings, type ClinicSettings } from "./clinic-settings";
+import { getClinicSettings, guidanceBlock, type ClinicSettings } from "./clinic-settings";
 import { advanceStage, logEvent, updateLead } from "./leads";
 import { fmtDateTime, todayLabel } from "./time";
 import type { Lead, Message } from "./types";
@@ -214,7 +214,7 @@ export async function runAgent(leadId: string): Promise<void> {
   const ctx: Ctx = { lead: leadRow as Lead, handoff: false, cfg };
   const lead = ctx.lead;
   const system =
-    `${script.prompt}\n\n${factsBlock(todayLabel(), cfg)}\n\n# CONTEXTO DO LEAD (CRM)\n` +
+    `${script.prompt}\n\n${factsBlock(todayLabel(), cfg)}${guidanceBlock(cfg)}\n\n# CONTEXTO DO LEAD (CRM)\n` +
     `Nome no WhatsApp: ${lead.name ?? "?"} | Paciente: ${lead.patient_name ?? "?"} | Especialidade: ${lead.specialty ?? "?"} | Convênio: ${lead.insurance ?? "?"} | Etapa: ${lead.stage}\n` +
     `Se o paciente pedir para não receber mais mensagens ou disser que não tem interesse, agradeça com educação, registre stage=perdido com lost_reason "pediu para parar" e não insista.`;
 
