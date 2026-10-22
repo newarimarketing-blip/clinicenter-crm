@@ -227,3 +227,16 @@ export function areasBlock(cfg: Pick<ClinicSettings, "professionals">): string {
   const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
   return [...by.entries()].map(([sp, names]) => `- ${cap(sp)} (${names.join(", ")})`).join("\n");
 }
+
+/** Frase pronta com as áreas atuais, ex.: "Pediatria, Psiquiatria, Fisioterapia (Dr. Gledson) ou Nutrição". */
+export function areasSentence(cfg: Pick<ClinicSettings, "professionals">): string {
+  const by = new Map<string, string[]>();
+  for (const p of cfg.professionals) {
+    const k = p.specialty.trim().toLowerCase();
+    by.set(k, [...(by.get(k) ?? []), p.name]);
+  }
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+  const items = [...by.entries()].map(([sp, names]) => (names.length === 1 ? `${cap(sp)} (${names[0]})` : cap(sp)));
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} ou ${items[items.length - 1]}`;
+}

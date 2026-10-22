@@ -7,7 +7,7 @@ import { splitMessage } from "./split";
 import { DEFAULT_SCRIPT } from "./default-script";
 import { CLINIC, factsBlock, STAGES } from "./clinic-config";
 import { activeAppointment, cancelById, cancelLatest, confirmAppointment, createAppointment, freeSlots, resolveSlot, upcomingAppointments } from "./agenda";
-import { areasBlock, getClinicSettings, guidanceBlock, type ClinicSettings } from "./clinic-settings";
+import { areasBlock, areasSentence, getClinicSettings, guidanceBlock, type ClinicSettings } from "./clinic-settings";
 import { advanceStage, logEvent, updateLead } from "./leads";
 import { fmtDateTime, todayLabel } from "./time";
 import type { Lead, Message } from "./types";
@@ -217,8 +217,6 @@ export async function runAgent(leadId: string): Promise<void> {
     `${script.prompt}\n\n${factsBlock(todayLabel(), cfg)}${guidanceBlock(cfg)}\n\n# CONTEXTO DO LEAD (CRM)\n` +
     `Nome no WhatsApp: ${lead.name ?? "?"} | Paciente: ${lead.patient_name ?? "?"} | Especialidade: ${lead.specialty ?? "?"} | Convênio: ${lead.insurance ?? "?"} | Etapa: ${lead.stage}\n` +
     `Se o paciente pedir para não receber mais mensagens ou disser que não tem interesse, agradeça com educação, registre stage=perdido com lost_reason "pediu para parar" e não insista.\n\n` +
-    `# ÁREAS ATENDIDAS HOJE (fonte de verdade para saudação e triagem)\n${areasBlock(cfg)}\n` +
-    `Ao se apresentar e perguntar em qual área a pessoa precisa de ajuda, liste SOMENTE as áreas acima, exatamente como estão (com o nome do profissional quando houver só um). Se o roteiro citar uma lista fixa de áreas, ignore-a e use esta.\n\n` +
     `# REGRAS DE AGENDAMENTO (valem sempre)\n` +
     `- A escolha de horário vale pela ÚLTIMA mensagem do paciente. Interprete pedidos informais ("dia 28 às 15", "28/10, 15hr" = 15:00) e ligue-os ao startTime exato devolvido pela última consultar_horarios. Se houver dúvida real entre dois horários, pergunte qual.\n` +
     `- Escolhido o horário e sabendo o nome do paciente, chame agendar_consulta NA HORA. O e-mail é opcional: nunca peça e-mail antes de tentar agendar (se quiser, peça depois de agendado).\n` +
@@ -236,7 +234,12 @@ export async function runAgent(leadId: string): Promise<void> {
 
   const keys = (cfg.professionals.length ? cfg.professionals.map((p) => p.key) : ["nenhum"]) as [string, ...string[]];
   const tools = buildTools(keys, [...cfg.specialties, "outra"]);
-  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock }, ...toChat(history)];
+  // Áreas atuais ficam no FIM do prompt (maior peso) e valem mesmo que o histórico tenha listado outras áreas.
+  const areasPrompt =
+    `\n\n# ÁREAS ATENDIDAS HOJE (fonte de verdade para saudação e triagem)\n${areasBlock(cfg)}\n` +
+    `Ao cumprimentar um paciente que ainda não disse a especialidade, pergunte exatamente assim: "Em qual área você precisa de ajuda: ${areasSentence(cfg)}?". ` +
+    `Esta lista é a ÚNICA válida agora: ignore listas diferentes que apareçam em mensagens anteriores desta conversa ou no roteiro, pois a clínica atualizou suas áreas.`;
+  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock + areasPrompt }, ...toChat(history)];
   let reply = "";
 
   for (let step = 0; step < MAX_STEPS; step++) {
