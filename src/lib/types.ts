@@ -20,6 +20,9 @@ export type Lead = {
   last_inbound_at: string | null;
   followup_count?: number;
   last_followup_at?: string | null;
+  summary?: string | null;
+  summary_at?: string | null;
+  notes?: string | null;
 };
 
 export type Message = {

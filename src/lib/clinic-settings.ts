@@ -1,6 +1,19 @@
 import { z } from "zod";
 import { admin } from "./supabase-admin";
-import { INSURANCE, PRICES, PROFESSIONALS, type Professional, type TimeWindow } from "./clinic-config";
+import { BASE_SPECIALTIES, INSURANCE, PRICES, PROFESSIONALS, type Professional, type TimeWindow } from "./clinic-config";
+
+export type Service = {
+  id: string;
+  name: string;
+  specialty: string | null;
+  professional_key: string | null;
+  price: string;
+  note: string | null;
+  particular_only: boolean;
+  active: boolean;
+  sort: number;
+};
+export type ProfessionalRow = Professional & { active: boolean };
 
 /**
  * Preços, grades e convênios EDITÁVEIS (tabela clinic_settings). Os valores de clinic-config.ts
@@ -15,6 +28,13 @@ export type ClinicSettings = {
   custom: { professionals: boolean; prices: boolean; insurance: boolean };
   /** false = tabela ainda não criada (migração 004 pendente) ou sem acesso ao banco */
   ready: boolean;
+  /** migração 006: profissionais e serviços cadastrados no banco */
+  tables: { professionals: boolean; services: boolean };
+  /** todos os profissionais, inclusive inativos (tela de Configurações e Agenda) */
+  professionalsAll: ProfessionalRow[];
+  services: Service[];
+  /** especialidades conhecidas (profissionais + serviços + padrão) */
+  specialties: string[];
 };
 
 export const HM = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -37,7 +57,25 @@ export const defaults = (): ClinicSettings => ({
   insurance: INSURANCE,
   custom: { professionals: false, prices: false, insurance: false },
   ready: false,
+  tables: { professionals: false, services: false },
+  professionalsAll: PROFESSIONALS.map((p) => ({ ...p, active: true })),
+  services: [],
+  specialties: [...BASE_SPECIALTIES],
 });
+
+const scheduleSchema = z.record(z.string().regex(/^[0-6]$/), z.array(windowSchema).max(4));
+
+export function serviceLine(s: Service, profs: Professional[]): string {
+  const who = s.professional_key ? profs.find((p) => p.key === s.professional_key)?.name : null;
+  const extras = [s.note, s.particular_only && !/particular/i.test(s.note ?? "") ? "somente particular" : null].filter(Boolean).join("; ");
+  return `${s.name}${who ? ` (${who})` : ""}: ${s.price}${extras ? ` — ${extras}` : ""}`;
+}
+
+export const slugKey = (name: string) =>
+  name
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+    .replace(/\b(dr|dra|doutor|doutora)\b\.?/g, " ")
+    .replace(/[^a-z0-9]+/g, " ").trim().split(" ")[0] || "prof";
 
 export function mergeProfessionals(stored: z.infer<typeof professionalsSchema>): Professional[] {
   return PROFESSIONALS.map((base) => {
@@ -53,31 +91,77 @@ let cache: { at: number; value: ClinicSettings } | null = null;
 const TTL_MS = 30_000;
 export const invalidateClinicSettings = () => (cache = null);
 
+type ProfDbRow = { key: string; name: string; specialty: string; slot_min: number; particular_only: boolean; schedule: unknown; calendar_id: string | null; active: boolean };
+
+function rowToProfessional(r: ProfDbRow): ProfessionalRow | null {
+  const sch = scheduleSchema.safeParse(r.schedule ?? {});
+  if (!sch.success) return null;
+  const base = PROFESSIONALS.find((b) => b.key === r.key);
+  const schedule: Record<number, TimeWindow[]> = {};
+  for (const [d, w] of Object.entries(sch.data)) if (w.length) schedule[+d] = w as TimeWindow[];
+  return {
+    key: r.key,
+    name: r.name,
+    specialty: r.specialty,
+    slotMin: r.slot_min,
+    particularOnly: r.particular_only,
+    schedule,
+    calendarId: r.calendar_id ?? undefined,
+    calEnv: base?.calEnv,
+    active: r.active,
+  };
+}
+
 export async function getClinicSettings(): Promise<ClinicSettings> {
   if (cache && Date.now() - cache.at < TTL_MS) return cache.value;
   const out = defaults();
   if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
     try {
-      const { data, error } = await admin().from("clinic_settings").select("key, value");
-      if (!error) {
+      const db = admin();
+      const [cs, pr, sv] = await Promise.all([
+        db.from("clinic_settings").select("key, value"),
+        db.from("professionals").select("*").order("created_at"),
+        db.from("services").select("*").order("sort").order("created_at"),
+      ]);
+      if (!cs.error) {
         out.ready = true;
-        for (const row of data ?? []) {
-          if (row.key === "prices") {
-            const p = pricesSchema.safeParse(row.value);
-            if (p.success) { out.prices = p.data; out.custom.prices = true; }
-          } else if (row.key === "insurance") {
+        for (const row of cs.data ?? []) {
+          if (row.key === "insurance") {
             const p = insuranceSchema.safeParse(row.value);
             if (p.success) { out.insurance = p.data; out.custom.insurance = true; }
+          } else if (row.key === "prices") {
+            const p = pricesSchema.safeParse(row.value);
+            if (p.success) { out.prices = p.data; out.custom.prices = true; }
           } else if (row.key === "professionals") {
             const p = professionalsSchema.safeParse(row.value);
             if (p.success) { out.professionals = mergeProfessionals(p.data); out.custom.professionals = true; }
           }
         }
       }
+      if (!pr.error && (pr.data?.length ?? 0) > 0) {
+        out.tables.professionals = true;
+        const all = (pr.data as ProfDbRow[]).map(rowToProfessional).filter((x): x is ProfessionalRow => !!x);
+        out.professionalsAll = all;
+        out.professionals = all.filter((p) => p.active);
+        out.custom.professionals = true;
+      } else {
+        out.professionalsAll = out.professionals.map((p) => ({ ...p, active: true }));
+      }
+      if (!sv.error) {
+        out.tables.services = true;
+        out.services = (sv.data ?? []) as Service[];
+        const act = out.services.filter((x) => x.active);
+        if (act.length) { out.prices = act.map((x) => serviceLine(x, out.professionals)); out.custom.prices = true; }
+      }
     } catch {
       /* fallback aos padrões */
     }
   }
+  if (!out.professionalsAll.length) out.professionalsAll = out.professionals.map((p) => ({ ...p, active: true }));
+  const set = new Set<string>(BASE_SPECIALTIES);
+  for (const p of out.professionalsAll) set.add(p.specialty.toLowerCase());
+  for (const x of out.services) if (x.specialty) set.add(x.specialty.toLowerCase());
+  out.specialties = [...set];
   cache = { at: Date.now(), value: out };
   return out;
 }
