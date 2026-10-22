@@ -148,12 +148,12 @@ export async function cancelLatest(leadId: string, calendarHint?: string) {
 
 type Appt = { id: string; professional: string; calendar_hint: string; starts_at: string; gcal_event_id: string | null };
 
-export async function cancelById(appt: Appt) {
+export async function cancelById(appt: Appt, status: "cancelado" | "remarcado" = "cancelado") {
   const cal = calendarClient();
   const p = profByKey(appt.calendar_hint);
   const id = p ? calendarId(p) : undefined;
   if (cal && id && appt.gcal_event_id) await cal.events.delete({ calendarId: id, eventId: appt.gcal_event_id }).catch(() => {});
-  await admin().from("appointments").update({ status: "cancelado" }).eq("id", appt.id);
+  await admin().from("appointments").update({ status }).eq("id", appt.id);
   return appt;
 }
 
@@ -184,3 +184,21 @@ export async function activeAppointment(leadId: string, calendarHint: string) {
 }
 
 export const allProfessionalKeys = PROFESSIONALS.map((p) => p.key);
+
+export type UpcomingAppt = Appt & { confirmed_at: string | null; reminder_sent_at: string | null };
+
+/** Consultas futuras ativas do lead (contexto do agente). Tolera migração 002 ainda não aplicada. */
+export async function upcomingAppointments(leadId: string): Promise<UpcomingAppt[]> {
+  const { data } = await admin().from("appointments").select("*").eq("lead_id", leadId).eq("status", "agendado").gte("starts_at", new Date().toISOString()).order("starts_at").limit(3);
+  return (data ?? []).map((a) => ({ ...a, confirmed_at: a.confirmed_at ?? null, reminder_sent_at: a.reminder_sent_at ?? null })) as UpcomingAppt[];
+}
+
+/** Marca a próxima consulta ativa como confirmada pelo paciente. */
+export async function confirmAppointment(leadId: string, calendarHint?: string) {
+  let q = admin().from("appointments").select("*").eq("lead_id", leadId).eq("status", "agendado").gte("starts_at", new Date().toISOString()).order("starts_at").limit(1);
+  if (calendarHint) q = q.eq("calendar_hint", calendarHint);
+  const appt = (await q).data?.[0];
+  if (!appt) return null;
+  await admin().from("appointments").update({ confirmed_at: new Date().toISOString() }).eq("id", appt.id); // sem a migração 002 apenas não grava
+  return appt as Appt;
+}
