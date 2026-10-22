@@ -172,7 +172,12 @@ async function cancelFromGoogle(leadId: string, calendarHint?: string) {
     if (!id) continue;
     const r = await cal.events.list({ calendarId: id, q: lead.phone, timeMin: new Date().toISOString(), singleEvents: true, orderBy: "startTime", maxResults: 1 });
     const ev = r.data.items?.[0];
-    if (ev?.id && ev.start?.dateTime) {
+    // só apaga se o telefone do paciente realmente consta na descrição (evita apagar evento de outra pessoa)
+    const digits = String(lead.phone).replace(/\D/g, "");
+    if (ev?.id && ev.start?.dateTime && digits && (ev.description ?? "").replace(/\D/g, "").includes(digits)) {
+      // evento criado pelo CRM/Marcelia: cancela pelo registro do banco, mantendo banco e Google sincronizados
+      const { data: known } = await admin().from("appointments").select("*").eq("gcal_event_id", ev.id).maybeSingle();
+      if (known) return cancelById(known as Appt);
       await cal.events.delete({ calendarId: id, eventId: ev.id });
       return { id: ev.id, professional: p.name, calendar_hint: p.key, starts_at: ev.start.dateTime, gcal_event_id: ev.id };
     }
