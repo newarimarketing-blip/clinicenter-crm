@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getAppointments, getLeads } from "@/lib/data";
-import { SPECIALTIES, STAGES, STAGE_LABEL } from "@/lib/clinic-config";
+import { STAGES, STAGE_LABEL } from "@/lib/clinic-config";
+import { getClinicSettings } from "@/lib/clinic-settings";
+import { LeadPanel } from "@/components/LeadPanel";
 import { SpecialtyChip } from "@/components/ui";
 import { StageSelect } from "@/components/StageSelect";
 import { AttendanceButtons } from "@/components/AttendanceButtons";
@@ -8,9 +10,11 @@ import { isPaused, relTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default async function Funil({ searchParams }: { searchParams: Promise<{ esp?: string }> }) {
-  const { esp } = await searchParams;
-  const [all, appts] = await Promise.all([getLeads(), getAppointments()]);
+export default async function Funil({ searchParams }: { searchParams: Promise<{ esp?: string; lead?: string }> }) {
+  const { esp, lead: openId } = await searchParams;
+  const [all, appts, cfg] = await Promise.all([getLeads(), getAppointments(), getClinicSettings()]);
+  const openLead = openId ? all.find((l) => l.id === openId) : undefined;
+  const base = esp ? `/funil?esp=${encodeURIComponent(esp)}` : "/funil";
   // consulta mais recente já iniciada (ou prestes a) de cada lead, para dar baixa direto no cartão
   const attendable = new Map<string, (typeof appts)[number]>();
   for (const a of appts) {
@@ -19,7 +23,8 @@ export default async function Funil({ searchParams }: { searchParams: Promise<{ 
     if (!cur || +new Date(a.starts_at) > +new Date(cur.starts_at)) attendable.set(a.lead_id, a);
   }
   const leads = esp ? all.filter((l) => (l.specialty ?? "a definir") === esp) : all;
-  const filters = [...SPECIALTIES.filter((s) => s !== "outra"), "a definir"];
+  const known = new Set([...cfg.specialties, ...all.map((l) => l.specialty).filter((x): x is string => !!x && x !== "outra")]);
+  const filters = [...known, "a definir"];
 
   return (
     <div className="space-y-5">
@@ -50,7 +55,7 @@ export default async function Funil({ searchParams }: { searchParams: Promise<{ 
               <div className="space-y-2">
                 {col.map((l) => (
                   <article key={l.id} className="card p-3">
-                    <Link href={`/conversas?lead=${l.id}`} className="block">
+                    <Link href={`${base}${base.includes("?") ? "&" : "?"}lead=${l.id}`} scroll={false} className="block">
                       <div className="flex items-start justify-between gap-2">
                         <span className="font-medium leading-tight">{l.name ?? l.phone}</span>
                         {l.score != null && <span className="text-xs tabular-nums text-muted">{l.score}</span>}
@@ -77,6 +82,7 @@ export default async function Funil({ searchParams }: { searchParams: Promise<{ 
           );
         })}
       </div>
+      {openLead && <LeadPanel lead={openLead} closeHref={base} />}
     </div>
   );
 }
