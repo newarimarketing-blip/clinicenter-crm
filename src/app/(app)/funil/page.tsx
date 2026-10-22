@@ -1,15 +1,23 @@
 import Link from "next/link";
-import { getLeads } from "@/lib/data";
+import { getAppointments, getLeads } from "@/lib/data";
 import { SPECIALTIES, STAGES, STAGE_LABEL } from "@/lib/clinic-config";
 import { SpecialtyChip } from "@/components/ui";
 import { StageSelect } from "@/components/StageSelect";
+import { AttendanceButtons } from "@/components/AttendanceButtons";
 import { isPaused, relTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 export default async function Funil({ searchParams }: { searchParams: Promise<{ esp?: string }> }) {
   const { esp } = await searchParams;
-  const all = await getLeads();
+  const [all, appts] = await Promise.all([getLeads(), getAppointments()]);
+  // consulta mais recente já iniciada (ou prestes a) de cada lead, para dar baixa direto no cartão
+  const attendable = new Map<string, (typeof appts)[number]>();
+  for (const a of appts) {
+    if (!["agendado", "compareceu", "faltou"].includes(a.status) || +new Date(a.starts_at) > Date.now() + 2 * 3600e3) continue;
+    const cur = attendable.get(a.lead_id);
+    if (!cur || +new Date(a.starts_at) > +new Date(cur.starts_at)) attendable.set(a.lead_id, a);
+  }
   const leads = esp ? all.filter((l) => (l.specialty ?? "a definir") === esp) : all;
   const filters = [...SPECIALTIES.filter((s) => s !== "outra"), "a definir"];
 
@@ -55,6 +63,9 @@ export default async function Funil({ searchParams }: { searchParams: Promise<{ 
                       {l.intent && <p className="mt-2 line-clamp-2 text-xs text-muted">{l.intent}</p>}
                       {l.lost_reason && <p className="mt-2 text-xs text-bad">Perdido: {l.lost_reason}</p>}
                     </Link>
+                    {attendable.get(l.id) && (s === "agendado" || s === "compareceu" || attendable.get(l.id)!.status === "faltou") && (
+                      <div className="mt-2"><AttendanceButtons appointmentId={attendable.get(l.id)!.id} status={attendable.get(l.id)!.status} /></div>
+                    )}
                     <div className="mt-2 flex items-center justify-between">
                       <span className="text-xs text-muted">há {relTime(l.last_message_at)}</span>
                       <StageSelect leadId={l.id} stage={l.stage} />
