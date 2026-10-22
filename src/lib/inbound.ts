@@ -76,6 +76,9 @@ export async function processWebhook(body: any) {
   const myId = inserted?.[0]?.id;
   if (!myId) return;
 
+  // o paciente voltou a falar: zera o contador de retomadas (máx. 2 por silêncio)
+  if ((lead.followup_count ?? 0) > 0) await db.from("leads").update({ followup_count: 0 }).eq("id", lead.id);
+
   if (lead.ai_paused_until && new Date(lead.ai_paused_until) > new Date()) return; // humano no comando
 
   // debounce: aguarda mensagens picotadas; só a ÚLTIMA execução responde

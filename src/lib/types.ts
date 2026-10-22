@@ -18,6 +18,8 @@ export type Lead = {
   ai_paused_until: string | null;
   last_message_at: string | null;
   last_inbound_at: string | null;
+  followup_count?: number;
+  last_followup_at?: string | null;
 };
 
 export type Message = {
@@ -42,6 +44,9 @@ export type Appointment = {
   ends_at: string;
   gcal_event_id: string | null;
   status: string;
+  created_at?: string;
+  reminder_sent_at?: string | null;
+  confirmed_at?: string | null;
 };
 
 export type ScriptVersion = {
@@ -62,4 +67,17 @@ export type Insight = {
   period_end: string;
   metrics: Record<string, unknown>;
   findings: { type: "funcionou" | "perdeu"; pattern: string; evidence: string }[];
+};
+
+export type AppointmentWithLead = Appointment & {
+  leads: { id: string; name: string | null; patient_name: string | null; phone: string; specialty: string | null } | null;
+};
+
+export type WeeklyReport = {
+  id: string;
+  created_at: string;
+  period_start: string;
+  period_end: string;
+  metrics: import("./report").ReportMetrics;
+  summary: string;
 };

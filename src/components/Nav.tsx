@@ -6,7 +6,10 @@ const items = [
   { href: "/", label: "Painel" },
   { href: "/funil", label: "Funil" },
   { href: "/conversas", label: "Conversas" },
+  { href: "/consultas", label: "Consultas" },
+  { href: "/relatorios", label: "Relatórios" },
   { href: "/script", label: "Script da IA" },
+  { href: "/configuracoes", label: "Configurações" },
 ];
 
 export function Nav() {

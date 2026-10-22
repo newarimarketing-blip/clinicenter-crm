@@ -43,12 +43,25 @@ export async function runLearning(days = 7): Promise<{ status: "ok" | "skipped";
   const lostReasons: Record<string, number> = {};
   for (const l of leads) if (l.lost_reason) lostReasons[l.lost_reason] = (lostReasons[l.lost_reason] ?? 0) + 1;
   const won = leads.filter((l) => WON.includes(l.stage));
-  const metrics = { total: leads.length, conversao: +(won.length / leads.length).toFixed(3), bySpecialty, byStage, lostReasons };
+  // conversão REAL (dada pela recepção em Consultas): compareceu x faltou, entre as consultas do período
+  const { data: ap } = await db.from("appointments").select("status, specialty, lead_id").gte("starts_at", start.toISOString()).lte("starts_at", end.toISOString());
+  const appts = (ap ?? []) as { status: string; specialty: string; lead_id: string }[];
+  const attendedN = appts.filter((a) => a.status === "compareceu").length;
+  const noShowN = appts.filter((a) => a.status === "faltou").length;
+  const noShowIds = new Set(appts.filter((a) => a.status === "faltou").map((a) => a.lead_id));
+  const attendedIds = new Set(appts.filter((a) => a.status === "compareceu").map((a) => a.lead_id));
+  const metrics = {
+    total: leads.length, conversao: +(won.length / leads.length).toFixed(3), bySpecialty, byStage, lostReasons,
+    compareceram: attendedN, faltaram: noShowN, comparecimento: attendedN + noShowN ? +(attendedN / (attendedN + noShowN)).toFixed(3) : null,
+  };
 
   // perdidos = marcados como perdido ou parados sem agendar (>48h sem resposta do paciente)
   const cutoff = Date.now() - 48 * 3600e3;
-  const lost = leads.filter((l) => !WON.includes(l.stage) && (l.stage === "perdido" || (l.last_inbound_at && +new Date(l.last_inbound_at) < cutoff)));
-  const [wonT, lostT] = await Promise.all([transcripts(won, 15), transcripts(lost, 15)]);
+  const lost = leads.filter((l) => !WON.includes(l.stage) && !noShowIds.has(l.id) && (l.stage === "perdido" || (l.last_inbound_at && +new Date(l.last_inbound_at) < cutoff)));
+  // conversas que realmente levaram o paciente à clínica vêm primeiro; as de quem faltou entram à parte
+  won.sort((a, b) => Number(attendedIds.has(b.id)) - Number(attendedIds.has(a.id)));
+  const noShowLeads = leads.filter((l) => noShowIds.has(l.id));
+  const [wonT, lostT, noShowT] = await Promise.all([transcripts(won, 15), transcripts(lost, 15), transcripts(noShowLeads, 6)]);
 
   const current = await activeScript();
   const sys = `Você é um consultor de vendas de clínicas de saúde. Analisa conversas de WhatsApp de uma atendente virtual (Marcelia) e melhora o SCRIPT dela.
@@ -58,7 +71,7 @@ Regras invioláveis ao reescrever:
 - Mantenha as seções do script, a persona e o uso das ferramentas (consultar_horarios, agendar_consulta, atualizar_lead, etc.).
 - Mude pouco e com evidência: no máximo 5 alterações, cada uma ligada a um padrão visto nas conversas.
 Responda SOMENTE JSON: {"findings":[{"type":"funcionou"|"perdeu","pattern":"...","evidence":"quantas conversas / exemplo curto"}],"changes":["alteração em linguagem simples"],"rationale":"resumo em 2 frases","proposed_prompt":"script completo reescrito"}`;
-  const user = `MÉTRICAS DA SEMANA:\n${JSON.stringify(metrics)}\n\nSCRIPT ATUAL:\n${current.prompt}\n\nCONVERSAS QUE AGENDARAM:\n${wonT.map((t) => `--- (${t.lead.specialty ?? "?"})\n${t.text}`).join("\n")}\n\nCONVERSAS PERDIDAS/PARADAS:\n${lostT.map((t) => `--- (${t.lead.specialty ?? "?"}, motivo: ${t.lead.lost_reason ?? "não informado"})\n${t.text}`).join("\n")}`;
+  const user = `MÉTRICAS DA SEMANA:\n${JSON.stringify(metrics)}\n\nSCRIPT ATUAL:\n${current.prompt}\n\nCONVERSAS QUE AGENDARAM:\n${wonT.map((t) => `--- (${t.lead.specialty ?? "?"})\n${t.text}`).join("\n")}\n\nCONVERSAS DE QUEM AGENDOU MAS FALTOU (aprenda o que reduz faltas: confirmação, lembrete, clareza do horário/endereço):\n${noShowT.map((t) => `--- (${t.lead.specialty ?? "?"})\n${t.text}`).join("\n")}\n\nCONVERSAS PERDIDAS/PARADAS:\n${lostT.map((t) => `--- (${t.lead.specialty ?? "?"}, motivo: ${t.lead.lost_reason ?? "não informado"})\n${t.text}`).join("\n")}`;
 
   const res = await openai().chat.completions.create({
     model: process.env.LEARN_MODEL || "gpt-4.1",

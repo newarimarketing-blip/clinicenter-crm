@@ -70,14 +70,17 @@ export const profByKey = (k: string) => PROFESSIONALS.find((p) => p.key === k);
 
 const DOW = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
 
-export function factsBlock(todayLabel: string): string {
-  const grades = PROFESSIONALS.map((p) => {
+export type FactsSource = { professionals: Professional[]; prices: string[]; insurance: Record<string, string[]> };
+
+/** `src` vem de getClinicSettings() (editável no CRM); sem ele, usa os padrões deste arquivo. */
+export function factsBlock(todayLabel: string, src: FactsSource = { professionals: PROFESSIONALS, prices: PRICES, insurance: INSURANCE }): string {
+  const grades = src.professionals.map((p) => {
     const days = Object.entries(p.schedule)
       .map(([d, w]) => `${DOW[+d]} ${w.map(([a, b]) => `${a}–${b}`).join(", ")}`)
       .join(" | ");
     return `- ${p.name} (${p.specialty}, calendar_hint="${p.key}"): ${days}; consultas de ${p.slotMin} em ${p.slotMin} min${p.particularOnly ? "; atende SOMENTE particular" : ""}`;
   }).join("\n");
-  const ins = Object.entries(INSURANCE).map(([k, v]) => `- ${k}: ${v.join(", ")}`).join("\n");
+  const ins = Object.entries(src.insurance).map(([k, v]) => `- ${k}: ${v.join(", ")}`).join("\n");
   return `# FATOS DA CLÍNICA (fonte de verdade — nunca contradiga)
 Hoje: ${todayLabel} (fuso de Fortaleza). Use sempre este ano e dia da semana.
 Endereço: ${CLINIC.address}
@@ -87,7 +90,7 @@ Telefone/WhatsApp geral: ${CLINIC.phone} (envie só se o paciente pedir ou para 
 ${grades}
 
 ## Valores
-${PRICES.map((p) => `- ${p}`).join("\n")}
+${src.prices.map((p) => `- ${p}`).join("\n")}
 
 ## Especialidades por convênio (para redirecionar)
 ${ins}`;

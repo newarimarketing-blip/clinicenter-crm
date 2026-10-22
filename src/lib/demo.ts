@@ -1,5 +1,5 @@
 // Dados fictícios só para visualizar o CRM sem Supabase configurado.
-import type { Appointment, Insight, Lead, Message, ScriptVersion } from "./types";
+import type { AppointmentWithLead, Insight, Lead, Message, ScriptVersion, WeeklyReport } from "./types";
 import type { Stage } from "./clinic-config";
 import { DEFAULT_SCRIPT } from "./default-script";
 
@@ -52,7 +52,24 @@ export const DEMO_MESSAGES: Message[] = [
   m("demo-3", "ia", "Consulta confirmada com a Dra. Maraysa, segunda às 15:00. Endereço: R. Divino Salvador, 187 - Centro, Barbalha. Até lá!", 95),
 ];
 
-export const DEMO_APPOINTMENTS: Appointment[] = [];
+const appt = (i: number, hoursFromNow: number, status: string, o: Partial<AppointmentWithLead> = {}): AppointmentWithLead => {
+  const l = DEMO_LEADS[i];
+  const start = new Date(Date.now() + hoursFromNow * 3600e3);
+  return {
+    id: `ap-${i}-${hoursFromNow}`, lead_id: l.id, professional: "Dra. Maraysa Lima", calendar_hint: "maraysa", specialty: l.specialty ?? "psiquiatria",
+    starts_at: start.toISOString(), ends_at: new Date(+start + 30 * 60000).toISOString(), gcal_event_id: null, status,
+    leads: { id: l.id, name: l.name, patient_name: l.patient_name, phone: l.phone, specialty: l.specialty }, ...o,
+  };
+};
+
+export const DEMO_APPOINTMENTS: AppointmentWithLead[] = [
+  appt(2, -26, "agendado"),
+  appt(4, -50, "compareceu"),
+  appt(12, -75, "faltou", { professional: "Dr. Gledson", calendar_hint: "gledson", specialty: "fisioterapia" }),
+  appt(9, -120, "compareceu", { professional: "Dr. Gledson", calendar_hint: "gledson", specialty: "fisioterapia" }),
+  appt(4, 20, "agendado", { reminder_sent_at: ago(5) }),
+  appt(12, 70, "agendado", { confirmed_at: ago(60), professional: "Dr. Gledson", calendar_hint: "gledson", specialty: "fisioterapia" }),
+];
 
 export const DEMO_SCRIPTS: ScriptVersion[] = [
   { id: "sv-3", created_at: ago(1440), version: 3, status: "proposta", prompt: DEFAULT_SCRIPT,
@@ -74,3 +91,13 @@ export const DEMO_INSIGHTS: Insight[] = [
       { type: "perdeu", pattern: "Fisioterapia: paciente com plano sai quando ouve 'só particular'", evidence: "5 leads, motivo: convênio" },
     ] },
 ];
+
+export const DEMO_REPORT: WeeklyReport = {
+  id: "rp-1", created_at: ago(1440), period_start: ago(1440 + 10080), period_end: ago(1440),
+  metrics: {
+    leads: 52, leadsPrev: 44, agendamentos: 19, agendamentosPrev: 15, conversao: 0.31, compareceram: 11, faltaram: 3, comparecimento: 0.79,
+    porEspecialidade: [{ especialidade: "pediatria", leads: 21, agendamentos: 8 }, { especialidade: "psiquiatria", leads: 17, agendamentos: 7 }, { especialidade: "fisioterapia", leads: 11, agendamentos: 4 }, { especialidade: "a definir", leads: 3, agendamentos: 0 }],
+    perdidos: { preço: 5, convênio: 4, "sem resposta": 3 }, automacao: { lembretes: 14, confirmados: 9, retomadas: 12 },
+  },
+  summary: "Semana de 12/10 a 18/10.\nChegaram 52 leads novos (+8 em relação à semana anterior (44)). 19 consultas foram agendadas (+4 em relação à semana anterior (15)), e 31% dos leads da semana chegaram a agendar.\nDas consultas da semana com baixa, 11 compareceram e 3 faltaram (comparecimento de 79%).\nEspecialidade em destaque: pediatria, com 21 leads e 8 agendamentos.\nPrincipal motivo de perda: preço (5 leads).\nA Marcelia enviou 14 lembretes de consulta (9 confirmados) e 12 mensagens de retomada.",
+};

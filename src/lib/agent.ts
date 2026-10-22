@@ -5,8 +5,9 @@ import { openai } from "./openai";
 import { sendText, typingDelay } from "./evolution";
 import { splitMessage } from "./split";
 import { DEFAULT_SCRIPT } from "./default-script";
-import { CLINIC, factsBlock, PROFESSIONALS, profByKey, SPECIALTIES, STAGES } from "./clinic-config";
-import { activeAppointment, cancelById, cancelLatest, createAppointment, freeSlots, resolveSlot } from "./agenda";
+import { CLINIC, factsBlock, PROFESSIONALS, SPECIALTIES, STAGES } from "./clinic-config";
+import { activeAppointment, cancelById, cancelLatest, confirmAppointment, createAppointment, freeSlots, resolveSlot, upcomingAppointments } from "./agenda";
+import { getClinicSettings, type ClinicSettings } from "./clinic-settings";
 import { advanceStage, logEvent, updateLead } from "./leads";
 import { fmtDateTime, todayLabel } from "./time";
 import type { Lead, Message } from "./types";
@@ -73,6 +74,14 @@ const tools: ChatCompletionTool[] = [
   {
     type: "function",
     function: {
+      name: "confirmar_consulta",
+      description: "Registra que o paciente CONFIRMOU presença na consulta já marcada (ex.: respondeu 'sim', 'confirmo', 'estarei lá' ao lembrete). Não use para agendar.",
+      parameters: { type: "object", properties: { calendar_hint: { type: "string", enum: keys } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "atualizar_lead",
       description: "Registra no CRM o que você descobriu sobre o lead. Chame assim que souber algo novo, sem avisar o paciente. score: 0-100 (0-30 só curiosidade, 31-60 interesse real, 61-100 pronto para agendar).",
       parameters: {
@@ -120,11 +129,11 @@ async function alertTeam(text: string) {
   if (to) await sendText(to, text, 500).catch(() => {});
 }
 
-type Ctx = { lead: Lead; handoff: boolean };
+type Ctx = { lead: Lead; handoff: boolean; cfg: ClinicSettings };
 
 async function runTool(name: string, rawArgs: string, ctx: Ctx): Promise<unknown> {
   const args = JSON.parse(rawArgs || "{}");
-  const p = args.calendar_hint ? profByKey(args.calendar_hint) : undefined;
+  const p = args.calendar_hint ? ctx.cfg.professionals.find((x) => x.key === args.calendar_hint) : undefined;
 
   switch (name) {
     case "consultar_horarios": {
@@ -161,9 +170,15 @@ async function runTool(name: string, rawArgs: string, ctx: Ctx): Promise<unknown
       if (!slot) return { erro: "horário indisponível; chame consultar_horarios de novo" };
       // cria o novo ANTES de cancelar o antigo: se falhar, o paciente não fica sem consulta
       await createAppointment({ leadId: ctx.lead.id, patient: ctx.lead.patient_name ?? ctx.lead.name ?? "Paciente", phone: ctx.lead.phone, p, slot });
-      await cancelById(old);
+      await cancelById(old, "remarcado"); // o horário antigo volta para a agenda
       await logEvent(ctx.lead.id, "appointment_rescheduled", { from: old.starts_at, to: slot.startTime });
       return { ok: true, profissional: p.name, horario: slot.label };
+    }
+    case "confirmar_consulta": {
+      const appt = await confirmAppointment(ctx.lead.id, args.calendar_hint);
+      if (!appt) return { erro: "nenhuma consulta ativa para confirmar" };
+      await logEvent(ctx.lead.id, "appointment_confirmed", { id: appt.id, starts_at: appt.starts_at });
+      return { ok: true, profissional: appt.professional, horario: fmtDateTime(appt.starts_at) };
     }
     case "atualizar_lead": {
       const patch = updateSchema.parse(args);
@@ -197,13 +212,22 @@ export async function runAgent(leadId: string): Promise<void> {
   const history = ((hist ?? []) as Message[]).reverse();
   const script = await activeScript();
 
-  const ctx: Ctx = { lead: leadRow as Lead, handoff: false };
+  const cfg = await getClinicSettings(); // preços, grades e convênios editados no CRM (com fallback)
+  const ctx: Ctx = { lead: leadRow as Lead, handoff: false, cfg };
   const lead = ctx.lead;
   const system =
-    `${script.prompt}\n\n${factsBlock(todayLabel())}\n\n# CONTEXTO DO LEAD (CRM)\n` +
-    `Nome no WhatsApp: ${lead.name ?? "?"} | Paciente: ${lead.patient_name ?? "?"} | Especialidade: ${lead.specialty ?? "?"} | Convênio: ${lead.insurance ?? "?"} | Etapa: ${lead.stage}`;
+    `${script.prompt}\n\n${factsBlock(todayLabel(), cfg)}\n\n# CONTEXTO DO LEAD (CRM)\n` +
+    `Nome no WhatsApp: ${lead.name ?? "?"} | Paciente: ${lead.patient_name ?? "?"} | Especialidade: ${lead.specialty ?? "?"} | Convênio: ${lead.insurance ?? "?"} | Etapa: ${lead.stage}\n` +
+    `Se o paciente pedir para não receber mais mensagens ou disser que não tem interesse, agradeça com educação, registre stage=perdido com lost_reason "pediu para parar" e não insista.`;
 
-  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system }, ...toChat(history)];
+  const upcoming = await upcomingAppointments(leadId);
+  const apptBlock = upcoming.length
+    ? `\n\n# CONSULTAS MARCADAS DESTE PACIENTE\n${upcoming.map((a) => `- ${a.professional} (calendar_hint="${a.calendar_hint}"): ${fmtDateTime(a.starts_at)}${a.confirmed_at ? " — presença já confirmada" : a.reminder_sent_at ? " — lembrete enviado, aguardando confirmação" : ""}`).join("\n")}\n` +
+      `Se o paciente confirmar presença (sim, confirmo, estarei lá): chame confirmar_consulta e agradeça em uma frase, sem repetir tudo.\n` +
+      `Se disser que NÃO pode ir ou pedir outro horário: seja acolhedora, chame consultar_horarios, ofereça até 3 opções e, quando escolher, use reagendar_consulta (o horário antigo volta sozinho para a agenda). Se desistir de vez, use cancelar_consulta e deixe a porta aberta para voltar.`
+    : "";
+
+  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock }, ...toChat(history)];
   let reply = "";
 
   for (let step = 0; step < MAX_STEPS; step++) {
