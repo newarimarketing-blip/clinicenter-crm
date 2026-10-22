@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { getLeads } from "@/lib/data";
+import { getAppointments, getLeads } from "@/lib/data";
 import { STAGES, STAGE_LABEL } from "@/lib/clinic-config";
 import { Bar, Kpi, SpecialtyChip, StageChip } from "@/components/ui";
 import { isPaused, relTime } from "@/lib/format";
@@ -7,13 +7,22 @@ import { isPaused, relTime } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function Painel() {
-  const all = await getLeads();
+  const [all, appts] = await Promise.all([getLeads(), getAppointments()]);
   const since = Date.now() - 30 * 86400e3;
   const leads = all.filter((l) => +new Date(l.created_at) >= since);
   const won = leads.filter((l) => l.stage === "agendado" || l.stage === "compareceu");
   const conv = leads.length ? Math.round((won.length / leads.length) * 100) : 0;
   const paused = leads.filter((l) => isPaused(l.ai_paused_until));
   const stale = leads.filter((l) => ["qualificado", "horario_oferecido"].includes(l.stage) && l.last_inbound_at && Date.now() - +new Date(l.last_inbound_at) > 6 * 3600e3);
+
+  // conversão real: quem de fato foi à consulta
+  const attended = leads.filter((l) => l.stage === "compareceu").length;
+  const realConv = leads.length ? Math.round((attended / leads.length) * 100) : 0;
+  const since30 = Date.now() - 30 * 86400e3;
+  const marked = appts.filter((a) => +new Date(a.starts_at) >= since30 && (a.status === "compareceu" || a.status === "faltou"));
+  const showed = marked.filter((a) => a.status === "compareceu").length;
+  const showRate = marked.length ? Math.round((showed / marked.length) * 100) : null;
+  const toMark = appts.filter((a) => a.status === "agendado" && +new Date(a.starts_at) <= Date.now()).length;
 
   const specs = Object.entries(
     leads.reduce<Record<string, { n: number; w: number }>>((a, l) => {
@@ -41,6 +50,9 @@ export default async function Painel() {
         <Kpi label="Agendados" value={won.length} hint={`${conv}% de conversão`} />
         <Kpi label="Aguardando retorno" value={stale.length} hint="sem resposta há +6 h" />
         <Kpi label="IA pausada" value={paused.length} hint="humano no comando" />
+        <Kpi label="Conversão real" value={`${realConv}%`} hint={`${attended} de ${leads.length} leads compareceram`} />
+        <Kpi label="Comparecimento" value={showRate === null ? "—" : `${showRate}%`} hint={marked.length ? `${showed} de ${marked.length} consultas com baixa` : "sem baixas ainda"} />
+        <Link href="/consultas" className="block"><Kpi label="Consultas sem baixa" value={toMark} hint="clique para dar baixa" /></Link>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
