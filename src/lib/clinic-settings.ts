@@ -81,6 +81,18 @@ export function guidanceBlock(cfg: Pick<ClinicSettings, "professionals" | "servi
   return `\n\n# ORIENTAÇÕES DE ATENDIMENTO POR ESPECIALIDADE (cadastradas pela clínica)\nUse apenas quando o paciente perguntar ou quando for relevante para agendar. Nunca invente nada além disto; se faltar informação, diga que vai confirmar com a equipe.\n${lines.join("\n")}`;
 }
 
+/** Áreas ativas hoje (uma linha por especialidade, com os profissionais), usadas na saudação da Marcelia. */
+export function areasBlock(cfg: Pick<ClinicSettings, "professionals">): string {
+  const by = new Map<string, string[]>();
+  for (const p of cfg.professionals) {
+    const k = p.specialty.trim().toLowerCase();
+    by.set(k, [...(by.get(k) ?? []), p.name]);
+  }
+  if (!by.size) return "- (nenhum profissional ativo: diga que vai verificar com a equipe)";
+  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+  return [...by.entries()].map(([sp, names]) => `- ${cap(sp)} (${names.join(", ")})`).join("\n");
+}
+
 export const slugKey = (name: string) =>
   name
     .normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
@@ -216,27 +228,10 @@ export function parseInsurance(text: string): { ok: true; value: Record<string, 
   return r.success ? { ok: true, value: r.data } : { ok: false, error: "convênios inválidos (nomes até 60 caracteres)" };
 }
 
-/** Áreas ativas hoje (uma linha por especialidade, com os profissionais), usadas na saudação da Marcelia. */
-export function areasBlock(cfg: Pick<ClinicSettings, "professionals">): string {
-  const by = new Map<string, string[]>();
-  for (const p of cfg.professionals) {
-    const k = p.specialty.trim().toLowerCase();
-    by.set(k, [...(by.get(k) ?? []), p.name]);
-  }
-  if (!by.size) return "- (nenhum profissional ativo: diga que vai verificar com a equipe)";
-  const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
-  return [...by.entries()].map(([sp, names]) => `- ${cap(sp)} (${names.join(", ")})`).join("\n");
-}
-
-/** Frase pronta com as áreas atuais, ex.: "Pediatria, Psiquiatria, Fisioterapia (Dr. Gledson) ou Nutrição". */
+/** Frase pronta só com as especialidades ativas (sem nomes de profissionais), ex.: "Pediatria, Psiquiatria ou Fisioterapia". */
 export function areasSentence(cfg: Pick<ClinicSettings, "professionals">): string {
-  const by = new Map<string, string[]>();
-  for (const p of cfg.professionals) {
-    const k = p.specialty.trim().toLowerCase();
-    by.set(k, [...(by.get(k) ?? []), p.name]);
-  }
   const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
-  const items = [...by.entries()].map(([sp, names]) => (names.length === 1 ? `${cap(sp)} (${names[0]})` : cap(sp)));
+  const items = [...new Set(cfg.professionals.map((p) => p.specialty.trim().toLowerCase()))].map(cap);
   if (items.length <= 1) return items[0] ?? "";
   return `${items.slice(0, -1).join(", ")} ou ${items[items.length - 1]}`;
 }
