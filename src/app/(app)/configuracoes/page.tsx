@@ -1,13 +1,15 @@
 import { getClinicSettings, DOW_SHORT, insuranceToText, scheduleToText, type ProfessionalRow } from "@/lib/clinic-settings";
 import { currentMe, listRoles } from "@/lib/roles";
 import { calendarId } from "@/lib/agenda";
-import { createCalendarFor, createProfessional, deleteService, restoreDefaults, saveInsurance, saveService, setRole, updateProfessional } from "@/app/actions";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { createCalendarFor, createProfessional, deleteProfessional, deleteService, restoreDefaults, saveInsurance, saveService, setRole, updateProfessional } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
 const OK: Record<string, string> = {
   insurance: "Convênios salvos.",
   professionals: "Especialista salvo. Os próximos horários oferecidos já seguem a nova grade.",
+  "prof-removido": "Especialista removido da lista.",
   "prof-novo": "Especialista cadastrado. A Marcelia já pode oferecer horários dele.",
   "agenda-criada": "Agenda criada no Google Calendar e compartilhada com a equipe.",
   servico: "Serviço salvo. A Marcelia já usa o novo valor.",
@@ -116,6 +118,7 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
                   <div className="flex flex-wrap gap-2">
                     <button className="btn btn-primary" disabled={lock}>Salvar</button>
                     {!hasCal && <button formAction={createCalendarFor} className="btn" disabled={lock}>Criar agenda no Google</button>}
+                    <ConfirmSubmit formAction={deleteProfessional} message={`Remover ${p.name} da lista? A agenda no Google não é apagada. Esta ação não pode ser desfeita.`} className="ml-auto text-xs text-bad underline" disabled={lock}>Remover</ConfirmSubmit>
                   </div>
                 )}
               </form>

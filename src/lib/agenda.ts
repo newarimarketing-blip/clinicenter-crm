@@ -53,7 +53,11 @@ async function busyIntervals(p: Professional, from: Date, to: Date): Promise<Int
   return busy;
 }
 
-export type SlotQuery = { janelaDias?: number; periodo?: "manha" | "tarde"; dia_semana?: string; date?: string };
+/** Manhã até 11:59, tarde de 12:00 a 17:59, noite a partir das 18:00. */
+export const periodOf = (hour: number): "manha" | "tarde" | "noite" => (hour < 12 ? "manha" : hour < 18 ? "tarde" : "noite");
+const PERIODO_LABEL = { manha: "manhã", tarde: "tarde", noite: "noite" } as const;
+
+export type SlotQuery = { janelaDias?: number; periodo?: "manha" | "tarde" | "noite"; dia_semana?: string; date?: string };
 
 export async function freeSlots(p: Professional, q: SlotQuery = {}, limit = 6): Promise<Slot[]> {
   const days = q.date ? 62 : Math.min(q.janelaDias ?? 14, 60);
@@ -70,8 +74,8 @@ export async function freeSlots(p: Professional, q: SlotQuery = {}, limit = 6): 
     for (const [ws, we] of p.schedule[dow] ?? []) {
       for (let t = ws; addMin(t, p.slotMin) <= we; t = addMin(t, p.slotMin)) {
         const hour = Number(t.slice(0, 2));
-        if (q.periodo === "manha" && hour >= 12) continue;
-        if (q.periodo === "tarde" && hour < 12) continue;
+        const per = periodOf(hour);
+        if (q.periodo && q.periodo !== per) continue;
         const s = +new Date(`${ymd}T${t}:00-03:00`);
         if (s < now + MIN_LEAD_MS) continue;
         const e = s + p.slotMin * 60e3;
@@ -79,7 +83,7 @@ export async function freeSlots(p: Professional, q: SlotQuery = {}, limit = 6): 
           s, e,
           startTime: `${ymd}T${t}:00-03:00`,
           endTime: `${ymd}T${addMin(t, p.slotMin)}:00-03:00`,
-          label: `${DOW[dow][0].toUpperCase()}${DOW[dow].slice(1)}, ${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)} às ${t}`,
+          label: `${DOW[dow][0].toUpperCase()}${DOW[dow].slice(1)}, ${pad(d.getUTCDate())}/${pad(d.getUTCMonth() + 1)} às ${t} (${PERIODO_LABEL[per]})`,
         });
       }
     }

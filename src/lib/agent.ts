@@ -19,12 +19,12 @@ const buildTools = (keys: [string, ...string[]], specialties: string[]): ChatCom
     type: "function",
     function: {
       name: "consultar_horarios",
-      description: "Consulta a agenda REAL do profissional. Chame sempre antes de citar qualquer data ou horário. Devolve startTime/endTime/label; apresente até 3 opções exatamente como vierem.",
+      description: "Consulta a agenda REAL do profissional. Chame sempre antes de citar qualquer data ou horário. Devolve startTime/endTime/label; apresente até 3 opções exatamente como vierem (o label já traz o período: manhã, tarde ou noite).",
       parameters: {
         type: "object",
         properties: {
           calendar_hint: { type: "string", enum: keys },
-          periodo: { type: "string", enum: ["manha", "tarde"], description: "Só se o paciente indicar preferência" },
+          periodo: { type: "string", enum: ["manha", "tarde", "noite"], description: "Só se o paciente indicar preferência (manhã até 11:59, tarde 12h–17:59, noite a partir das 18h)" },
           dia_semana: { type: "string", enum: ["segunda", "terca", "quarta", "quinta", "sexta", "sabado"], description: "Só se o paciente indicar o dia" },
           janela_dias: { type: "integer", description: "Padrão 14. Use 30 quando o paciente recusar as opções." },
         },
@@ -237,7 +237,8 @@ export async function runAgent(leadId: string): Promise<void> {
   // Áreas atuais ficam no FIM do prompt (maior peso) e valem mesmo que o histórico tenha listado outras áreas.
   const areasPrompt =
     `\n\n# ÁREAS ATENDIDAS HOJE (fonte de verdade para saudação e triagem)\n${areasBlock(cfg)}\n` +
-    `Ao cumprimentar um paciente que ainda não disse a especialidade, pergunte exatamente assim: "Em qual área você precisa de ajuda: ${areasSentence(cfg)}?". ` +
+    `BOAS-VINDAS (sempre): em toda saudação, seja o paciente novo ou antigo, conhecido ou não no CRM, e mesmo que o CRM já traga uma especialidade, apresente-se e liste as especialidades atuais exatamente assim: "Em qual área você precisa de ajuda: ${areasSentence(cfg)}?". ` +
+    `Na saudação cite SOMENTE as especialidades, nunca o nome de nenhum profissional (os nomes só aparecem depois, ao oferecer horários). Só pule a lista se a mensagem do paciente já disser a especialidade desejada. ` +
     `Esta lista é a ÚNICA válida agora: ignore listas diferentes que apareçam em mensagens anteriores desta conversa ou no roteiro, pois a clínica atualizou suas áreas.`;
   const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock + areasPrompt }, ...toChat(history)];
   let reply = "";
