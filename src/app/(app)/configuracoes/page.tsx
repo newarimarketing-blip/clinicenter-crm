@@ -1,4 +1,4 @@
-import { getClinicSettings, DOW_SHORT, insuranceToText, scheduleToText, type ProfessionalRow } from "@/lib/clinic-settings";
+import { getClinicSettings, DOW_SHORT, insuranceToText, scheduleByPeriod, type ProfessionalRow } from "@/lib/clinic-settings";
 import { currentMe, listRoles } from "@/lib/roles";
 import { calendarId } from "@/lib/agenda";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
@@ -24,14 +24,29 @@ const OK: Record<string, string> = {
 const input = "w-full rounded-lg border border-line bg-white px-3 py-2 text-sm disabled:bg-slate-50";
 
 function ScheduleFields({ p, disabled }: { p?: ProfessionalRow; disabled?: boolean }) {
+  const cols = [
+    { id: "manha", label: "Manhã", ph: "08:00-12:00" },
+    { id: "tarde", label: "Tarde", ph: "15:00-17:00" },
+    { id: "noite", label: "Noite", ph: "18:00-21:00" },
+  ] as const;
   return (
-    <div className="grid grid-cols-[3rem_1fr] items-center gap-x-2 gap-y-1.5">
-      {[1, 2, 3, 4, 5, 6, 0].map((d) => (
-        <label key={d} className="contents text-sm">
-          <span className="text-muted">{DOW_SHORT[d]}</span>
-          <input name={`dow${d}`} disabled={disabled} defaultValue={scheduleToText(p?.schedule[d])} placeholder="15:00-17:00" className={input} />
-        </label>
-      ))}
+    <div className="space-y-1.5">
+      <p className="text-xs text-muted">Horários de atendimento por período. Deixe em branco o período em que não atende. Ex.: Manhã 08:00-12:00 e Tarde 15:00-17:00. Mais de uma faixa no mesmo período: separe por vírgula.</p>
+      <div className="grid grid-cols-[2.5rem_repeat(3,minmax(0,1fr))] items-center gap-x-2 gap-y-1.5">
+        <span />
+        {cols.map((c) => <span key={c.id} className="text-xs font-medium text-muted">{c.label}</span>)}
+        {[1, 2, 3, 4, 5, 6, 0].map((d) => {
+          const v = scheduleByPeriod(p?.schedule[d]);
+          return (
+            <label key={d} className="contents text-sm">
+              <span className="text-muted">{DOW_SHORT[d]}</span>
+              {cols.map((c) => (
+                <input key={c.id} name={`dow${d}_${c.id}`} disabled={disabled} defaultValue={v[c.id]} placeholder={c.ph} aria-label={`${DOW_SHORT[d]} ${c.label}`} className={`${input} px-2`} />
+              ))}
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
