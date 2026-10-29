@@ -198,6 +198,18 @@ async function runTool(name: string, rawArgs: string, ctx: Ctx): Promise<unknown
   }
 }
 
+/** Mensagem só de cumprimento ("oi", "boa tarde", "olá, tudo bem?"): a saudação é montada em código, sem depender do modelo. */
+export function isGreetingOnly(text: string): boolean {
+  const t = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!t || t.length > 40) return false;
+  return /^(oi+|oie+|ola+|opa|e ai|eae|hey|hello|bom dia|boa tarde|boa noite|bom diaa*|boa tardee*|boa noitee*)( tudo bem| td bem| tudo bom)?( com voces| com vc)?$/.test(t);
+}
+
+function periodGreeting(): string {
+  const h = Number(new Intl.DateTimeFormat("en-US", { timeZone: "America/Fortaleza", hour: "numeric", hour12: false }).format(new Date())) % 24;
+  return h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite";
+}
+
 function toChat(history: Message[]): ChatCompletionMessageParam[] {
   return history.map((m) => ({ role: m.role === "lead" ? "user" : "assistant", content: m.content }) as ChatCompletionMessageParam);
 }
@@ -241,9 +253,14 @@ export async function runAgent(leadId: string): Promise<void> {
     `Na saudação cite SOMENTE as especialidades, nunca o nome de nenhum profissional (os nomes só aparecem depois, ao oferecer horários). Só pule a lista se a mensagem do paciente já disser a especialidade desejada. ` +
     `Esta lista é a ÚNICA válida agora: ignore listas diferentes que apareçam em mensagens anteriores desta conversa ou no roteiro, pois a clínica atualizou suas áreas.`;
   const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock + areasPrompt }, ...toChat(history)];
-  let reply = "";
+  // Saudação determinística: só especialidades ativas, nunca nomes de profissionais (vale para lead novo ou antigo).
+  const lastIn = [...history].reverse().find((m) => m.role === "lead")?.content ?? "";
+  let reply =
+    isGreetingOnly(lastIn) && !upcoming.length && cfg.professionals.length
+      ? `${periodGreeting()}! Aqui é a Marcelia da Clinicenter. Em qual área você precisa de ajuda: ${areasSentence(cfg)}?`
+      : "";
 
-  for (let step = 0; step < MAX_STEPS; step++) {
+  for (let step = 0; !reply && step < MAX_STEPS; step++) {
     const res = await openai().chat.completions.create({
       model: process.env.AGENT_MODEL || "gpt-4.1-mini",
       messages,
