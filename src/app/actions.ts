@@ -145,6 +145,7 @@ export async function generateReportNow() {
   redirect("/relatorios");
 }
 
+
 /* ---------- Profissionais, serviços e equipe (somente gestor) ---------- */
 
 const err = (m: string) => back("erro=" + encodeURIComponent(m));
@@ -221,6 +222,28 @@ export async function updateProfessional(formData: FormData) {
   revalidatePath("/configuracoes");
   revalidatePath("/agenda");
   return back("ok=professionals");
+}
+
+/** Remove um especialista da lista. Bloqueia se houver consulta futura ativa (para não deixar evento órfão na agenda). */
+export async function deleteProfessional(formData: FormData) {
+  await gestorOnly();
+  const key = String(formData.get("key") ?? "");
+  if (!key) return err("Especialista inválido.");
+  const db = admin();
+  const { count } = await db
+    .from("appointments")
+    .select("id", { count: "exact", head: true })
+    .eq("calendar_hint", key)
+    .eq("status", "agendado")
+    .gte("starts_at", new Date().toISOString());
+  if (count && count > 0) return err(`Há ${count} consulta(s) futura(s) com este especialista. Cancele ou remarque antes de remover (ou apenas desmarque "Ativo").`);
+  await db.from("services").update({ professional_key: null }).eq("professional_key", key);
+  const { error } = await db.from("professionals").delete().eq("key", key);
+  if (error) return err(/relation|schema cache/i.test(error.message) ? TABLE_MSG : error.message);
+  invalidateClinicSettings();
+  revalidatePath("/configuracoes");
+  revalidatePath("/agenda");
+  return back("ok=prof-removido");
 }
 
 /** Cria a agenda do Google para um profissional que ainda não tem uma. */
