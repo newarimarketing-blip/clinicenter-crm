@@ -6,7 +6,7 @@ import { sendText } from "@/lib/evolution";
 import { runLearning } from "@/lib/learn";
 import { generateWeeklyReport } from "@/lib/report";
 import { admin } from "@/lib/supabase-admin";
-import { getClinicSettings, invalidateClinicSettings, parseInsurance, parseWindows, slugKey } from "@/lib/clinic-settings";
+import { DOW_SHORT, getClinicSettings, invalidateClinicSettings, parseInsurance, parseWindows, slugKey } from "@/lib/clinic-settings";
 import { createProfessionalCalendar } from "@/lib/agenda";
 import { currentMe } from "@/lib/roles";
 import { CLINIC, type Stage } from "@/lib/clinic-config";
@@ -154,9 +154,12 @@ const TABLE_MSG = "As tabelas novas ainda não existem: rode a migração 006 no
 function readSchedule(formData: FormData, who: string): Record<string, [string, string][]> {
   const schedule: Record<string, [string, string][]> = {};
   for (let d = 0; d < 7; d++) {
-    const w = parseWindows(String(formData.get(`dow${d}`) ?? ""));
+    const text = ["manha", "tarde", "noite", ""].map((p) => String(formData.get(p ? `dow${d}_${p}` : `dow${d}`) ?? "").trim()).filter(Boolean).join(", ");
+    const w = parseWindows(text);
     if (!w.ok) return err(`${who}: ${w.error}`);
-    if (w.value.length) schedule[String(d)] = w.value;
+    const sorted = [...w.value].sort((a, b) => a[0].localeCompare(b[0]));
+    for (let i = 1; i < sorted.length; i++) if (sorted[i][0] < sorted[i - 1][1]) return err(`${who}: horários sobrepostos em ${DOW_SHORT[d]} (${sorted[i - 1][0]}-${sorted[i - 1][1]} e ${sorted[i][0]}-${sorted[i][1]}).`);
+    if (sorted.length) schedule[String(d)] = sorted;
   }
   return schedule;
 }
