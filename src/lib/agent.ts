@@ -256,8 +256,9 @@ export async function runAgent(leadId: string): Promise<void> {
   // Saudação determinística: só especialidades ativas, nunca nomes de profissionais (vale para lead novo ou antigo).
   const lastIn = [...history].reverse().find((m) => m.role === "lead")?.content ?? "";
   let reply =
-    isGreetingOnly(lastIn) && !upcoming.length && cfg.professionals.length
-      ? `${periodGreeting()}! Aqui é a Marcelia da Clinicenter. Em qual área você precisa de ajuda: ${areasSentence(cfg)}?`
+    isGreetingOnly(lastIn) && cfg.professionals.length
+      ? `${periodGreeting()}! Aqui é a Marcelia da Clinicenter. Em qual área você precisa de ajuda: ${areasSentence(cfg)}?` +
+        (upcoming.length ? ` Se for sobre a sua consulta com ${upcoming[0].professional} (${fmtDateTime(upcoming[0].starts_at)}), é só me dizer.` : "")
       : "";
 
   for (let step = 0; !reply && step < MAX_STEPS; step++) {
