@@ -197,6 +197,13 @@ export function scheduleToText(windows: TimeWindow[] | undefined): string {
   return (windows ?? []).map(([a, b]) => `${a}-${b}`).join(", ");
 }
 
+/** Separa as janelas de um dia em manhã (início até 11:59), tarde (12:00–17:59) e noite (18:00 em diante), pelo horário de início. */
+export function scheduleByPeriod(windows: TimeWindow[] | undefined): { manha: string; tarde: string; noite: string } {
+  const by: Record<"manha" | "tarde" | "noite", TimeWindow[]> = { manha: [], tarde: [], noite: [] };
+  for (const w of windows ?? []) by[w[0] < "12:00" ? "manha" : w[0] < "18:00" ? "tarde" : "noite"].push(w);
+  return { manha: scheduleToText(by.manha), tarde: scheduleToText(by.tarde), noite: scheduleToText(by.noite) };
+}
+
 /** "15:00-17:00, 18:00-19:00" -> janelas. Retorna erro em português se algo estiver fora do padrão. */
 export function parseWindows(text: string): { ok: true; value: TimeWindow[] } | { ok: false; error: string } {
   const t = text.trim();
