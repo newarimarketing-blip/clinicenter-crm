@@ -2,7 +2,7 @@ import { STAGE_LABEL, type Stage } from "@/lib/clinic-config";
 
 const STAGE_STYLE: Record<Stage, string> = {
   novo: "bg-slate-100 text-slate-700",
-  qualificado: "bg-sky-100 text-sky-800",
+  qualificado: "bg-brand-soft text-brand",
   horario_oferecido: "bg-amber-100 text-amber-800",
   agendado: "bg-ok-soft text-green-800",
   compareceu: "bg-emerald-200 text-emerald-900",
@@ -33,7 +33,7 @@ export function Bar({ label, value, max, sub }: { label: string; value: number; 
         <span className="tabular-nums text-muted">{sub ?? value}</span>
       </div>
       <div className="h-2.5 rounded-full bg-line">
-        <div className="h-2.5 rounded-full bg-brand" style={{ width: `${max ? Math.max(3, (value / max) * 100) : 0}%` }} />
+        <div className="h-2.5 rounded-full bg-accent" style={{ width: `${max ? Math.max(3, (value / max) * 100) : 0}%` }} />
       </div>
     </div>
   );
