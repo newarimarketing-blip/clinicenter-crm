@@ -12,12 +12,12 @@ const OFFSET = 3 * 3600e3; // Fortaleza = UTC-3
 const DAY = 86400e3;
 const DOW = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const PALETTE = [
-  "bg-teal-100 text-teal-900 border-teal-300",
+  "bg-[#def3f4] text-[#0e373f] border-[#33b6bc]",
   "bg-sky-100 text-sky-900 border-sky-300",
   "bg-violet-100 text-violet-900 border-violet-300",
   "bg-amber-100 text-amber-900 border-amber-300",
   "bg-rose-100 text-rose-900 border-rose-300",
-  "bg-lime-100 text-lime-900 border-lime-300",
+  "bg-[#e2f3e0] text-[#2c5a28] border-[#73bb6c]",
   "bg-orange-100 text-orange-900 border-orange-300",
   "bg-indigo-100 text-indigo-900 border-indigo-300",
 ];

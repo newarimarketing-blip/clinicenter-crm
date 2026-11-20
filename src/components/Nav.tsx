@@ -20,7 +20,7 @@ export function Nav() {
       {items.map((i) => {
         const active = i.href === "/" ? path === "/" : path.startsWith(i.href);
         return (
-          <Link key={i.href} href={i.href} className={`rounded-lg px-3 py-2 text-sm font-medium ${active ? "bg-brand-soft text-brand" : "text-muted hover:bg-black/5"}`}>
+          <Link key={i.href} href={i.href} className={`rounded-lg px-3 py-2 text-sm font-medium ${active ? "bg-brand text-white" : "text-muted hover:bg-brand-soft hover:text-brand"}`}>
             {i.label}
           </Link>
         );
