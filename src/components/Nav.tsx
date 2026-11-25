@@ -9,6 +9,7 @@ const items = [
   { href: "/funil", label: "Funil" },
   { href: "/conversas", label: "Conversas" },
   { href: "/consultas", label: "Consultas" },
+  { href: "/faltas", label: "Faltas" },
   { href: "/relatorios", label: "Relatórios" },
   { href: "/configuracoes", label: "Configurações" },
 ];
