@@ -1,4 +1,5 @@
 "use server";
+import { backTo } from "@/lib/aba";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { isDemo, supabaseServer } from "@/lib/supabase-server";
@@ -50,21 +51,21 @@ export async function approveScript(id: string) {
   if (!ctx) return;
   await ctx.db.from("script_versions").update({ status: "arquivada" }).eq("status", "ativa");
   await ctx.db.from("script_versions").update({ status: "ativa", approved_by: ctx.user.id, approved_at: new Date().toISOString() }).eq("id", id);
-  revalidatePath("/script");
+  revalidatePath("/conversas");
 }
 
 export async function rejectScript(id: string) {
   const ctx = await requireUser();
   if (!ctx) return;
   await ctx.db.from("script_versions").update({ status: "rejeitada" }).eq("id", id);
-  revalidatePath("/script");
+  revalidatePath("/conversas");
 }
 
 export async function runLearningNow() {
   const ctx = await requireUser();
   if (!ctx) return;
   await runLearning(7);
-  revalidatePath("/script");
+  revalidatePath("/conversas");
 }
 
 export type Attendance = "compareceu" | "faltou" | "limpar";
@@ -92,7 +93,7 @@ export async function markAttendance(appointmentId: string, result: Attendance) 
 
 /* ---------- Configurações da clínica (preços, convênios, grades) ---------- */
 
-const back = (q: string): never => redirect(`/configuracoes?${q}`);
+const back = (q: string): Promise<never> => backTo("/configuracoes", q);
 
 /** Só gestor altera configurações (a recepção apenas visualiza). */
 async function gestorOnly() {
@@ -151,7 +152,7 @@ export async function generateReportNow() {
 const err = (m: string) => back("erro=" + encodeURIComponent(m));
 const TABLE_MSG = "As tabelas novas ainda não existem: rode a migração 006 no Supabase.";
 
-function readSchedule(formData: FormData, who: string): Record<string, [string, string][]> {
+async function readSchedule(formData: FormData, who: string): Promise<Record<string, [string, string][]>> {
   const schedule: Record<string, [string, string][]> = {};
   for (let d = 0; d < 7; d++) {
     const text = ["manha", "tarde", "noite", ""].map((p) => String(formData.get(p ? `dow${d}_${p}` : `dow${d}`) ?? "").trim()).filter(Boolean).join(", ");
@@ -182,7 +183,7 @@ export async function createProfessional(formData: FormData) {
   if (name.length < 2 || name.length > 80) return err("Informe o nome do especialista.");
   if (specialty.length < 3 || specialty.length > 40) return err("Informe a especialidade (3 a 40 letras).");
   if (!Number.isInteger(slotMin) || slotMin < 10 || slotMin > 180) return err("A duração da consulta deve ficar entre 10 e 180 minutos.");
-  const schedule = readSchedule(formData, name);
+  const schedule = await readSchedule(formData, name);
 
   const taken = new Set(cfg.professionalsAll.map((p) => p.key));
   const base = slugKey(name);
@@ -218,7 +219,7 @@ export async function updateProfessional(formData: FormData) {
   if (name.length < 2 || name.length > 80) return err("Informe o nome do especialista.");
   if (specialty.length < 3 || specialty.length > 40) return err("Informe a especialidade (3 a 40 letras).");
   if (!Number.isInteger(slotMin) || slotMin < 10 || slotMin > 180) return err("A duração da consulta deve ficar entre 10 e 180 minutos.");
-  const schedule = readSchedule(formData, name);
+  const schedule = await readSchedule(formData, name);
   const { error } = await admin().from("professionals").update({ name, specialty, slot_min: slotMin, particular_only: formData.get("particularOnly") === "on", schedule, active: formData.get("active") === "on", guidance: guidanceOf(formData) }).eq("key", key);
   if (error) return err(/relation|schema cache/i.test(error.message) ? TABLE_MSG : error.message);
   invalidateClinicSettings();
