@@ -5,6 +5,8 @@ import { isDemo, supabaseServer } from "@/lib/supabase-server";
 import { DEMO_APPOINTMENTS } from "@/lib/demo";
 import { timeHM } from "@/lib/format";
 import type { AppointmentWithLead } from "@/lib/types";
+import { ScheduleDialog } from "@/components/ScheduleDialog";
+import { WaitlistRemove } from "@/components/WaitlistRemove";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +77,16 @@ export default async function Agenda({ searchParams }: { searchParams: Promise<{
   }
   items.sort((a, b) => a.start - b.start);
 
+  // lista de espera (pedidos de horário sem vaga); tolera a migração 008 ainda não aplicada
+  type WaitRow = { id: string; created_at: string; professional_key: string; periodo: string | null; dia_semana: string | null; status: string; offered_starts_at: string | null; leads: { id: string; name: string | null; patient_name: string | null; phone: string } | null };
+  let waits: WaitRow[] = [];
+  if (!isDemo) {
+    const db = await supabaseServer();
+    const { data } = await db.from("waitlist").select("id,created_at,professional_key,periodo,dia_semana,status,offered_starts_at,leads(id,name,patient_name,phone)").in("status", ["aguardando", "oferecido"]).order("created_at");
+    waits = (data ?? []) as unknown as WaitRow[];
+  }
+  const PER: Record<string, string> = { manha: "manhã", tarde: "tarde", noite: "noite" };
+
   const color = (key: string) => PALETTE[Math.max(0, profs.findIndex((p) => p.key === key)) % PALETTE.length];
   const nameOf = (key: string) => profs.find((p) => p.key === key)?.name ?? key;
   const q = (o: { prof?: string; sem?: number }) => {
@@ -96,7 +108,8 @@ export default async function Agenda({ searchParams }: { searchParams: Promise<{
           <h1 className="text-2xl font-semibold tracking-tight">Agenda</h1>
           <p className="text-sm text-muted">Consultas marcadas pela Marcelia e pela equipe no Google Calendar, {selected ? `de ${selected.name}` : "de todos os profissionais"}.</p>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <ScheduleDialog profs={profs.filter((p) => p.active).map((p) => ({ key: p.key, name: p.name, specialty: p.specialty }))} defaultProf={selected?.key} />
           <Link href={q({ sem: offset - 1 })} className="btn !px-3">←</Link>
           <Link href={q({ sem: 0 })} className="btn">Hoje</Link>
           <Link href={q({ sem: offset + 1 })} className="btn !px-3">→</Link>
@@ -151,6 +164,28 @@ export default async function Agenda({ searchParams }: { searchParams: Promise<{
           );
         })}
       </div>
+
+      {!isDemo && (
+        <section className="card p-5">
+          <h2 className="mb-1 text-sm font-semibold">Lista de espera</h2>
+          <p className="mb-3 max-w-2xl text-xs text-muted">Pacientes que pediram um horário sem vaga. Quando uma vaga abre (cancelamento ou remarcação), a Marcelia avisa o primeiro da fila por WhatsApp e espera a resposta; sem resposta em 2 horas, a vaga segue para o próximo.</p>
+          {waits.length === 0 ? (
+            <p className="text-sm text-muted">Ninguém na lista de espera.</p>
+          ) : (
+            <ul className="divide-y divide-line text-sm">
+              {waits.map((w) => (
+                <li key={w.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+                  <Link href={w.leads ? `/funil?lead=${w.leads.id}` : "/funil"} className="font-medium underline-offset-2 hover:underline">{w.leads?.patient_name ?? w.leads?.name ?? w.leads?.phone ?? "Paciente"}</Link>
+                  <span className="text-muted">{nameOf(w.professional_key)}</span>
+                  <span className="text-xs text-muted">{[w.dia_semana, w.periodo ? PER[w.periodo] : null].filter(Boolean).join(" · ") || "qualquer dia e período"}</span>
+                  {w.status === "oferecido" && <span className="chip bg-warn-soft text-warn">vaga oferecida, aguardando resposta</span>}
+                  <span className="ml-auto"><WaitlistRemove id={w.id} /></span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
     </div>
   );
 }
