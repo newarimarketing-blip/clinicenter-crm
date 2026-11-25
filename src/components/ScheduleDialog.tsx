@@ -16,13 +16,13 @@ export function ScheduleDialog({ profs, defaultProf }: { profs: Prof[]; defaultP
   const [prof, setProf] = useState(defaultProf && profs.some((p) => p.key === defaultProf) ? defaultProf : profs[0]?.key ?? "");
   const [date, setDate] = useState("");
   const [slots, setSlots] = useState<SlotOption[] | null>(null);
-  const [slot, setSlot] = useState("");
+  const [time, setTime] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [pending, start] = useTransition();
 
   useEffect(() => {
-    setSlot(""); setSlots(null);
+    setTime(""); setSlots(null);
     if (!open || !prof || !date) return;
     let live = true;
     setLoading(true);
@@ -38,11 +38,11 @@ export function ScheduleDialog({ profs, defaultProf }: { profs: Prof[]; defaultP
     e.preventDefault();
     setMsg(null);
     start(async () => {
-      const r = await bookAppointment({ name, phone, profKey: prof, startTime: slot, insurance });
+      const r = await bookAppointment({ name, phone, profKey: prof, date, time, insurance });
       if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Não foi possível agendar." });
-      setMsg({ ok: true, text: "Consulta agendada!" });
+      setMsg({ ok: true, text: r.newClient ? "Consulta agendada e novo cliente cadastrado!" : "Consulta agendada!" });
       router.refresh();
-      setTimeout(() => { setOpen(false); setMsg(null); setName(""); setPhone(""); setInsurance(""); setDate(""); }, 900);
+      setTimeout(() => { setOpen(false); setMsg(null); setName(""); setPhone(""); setInsurance(""); setDate(""); setTime(""); }, 1400);
     });
   }
 
@@ -77,22 +77,27 @@ export function ScheduleDialog({ profs, defaultProf }: { profs: Prof[]; defaultP
             <label className="block text-xs text-muted">Data
               <input type="date" min={today} value={date} onChange={(e) => setDate(e.target.value)} required className={`${field} mt-1`} />
             </label>
-            {date && (
-              <div>
-                <div className="mb-1 text-xs text-muted">Horários livres</div>
-                {loading && <p className="text-sm text-muted">Buscando horários…</p>}
-                {!loading && slots && slots.length === 0 && <p className="text-sm text-muted">Sem horários livres nesse dia. Escolha outra data (confira os dias de atendimento do especialista).</p>}
-                <div className="flex flex-wrap gap-1.5">
-                  {slots?.map((s) => (
-                    <button key={s.startTime} type="button" onClick={() => setSlot(s.startTime)} className={`chip border ${slot === s.startTime ? "border-brand bg-brand text-white" : "border-line bg-white"}`}>{s.label.replace(/ \(.*\)$/, "")}</button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {msg && <p className={`rounded-lg px-3 py-2 text-sm ${msg.ok ? "bg-ok-soft text-green-800" : "bg-bad-soft text-bad"}`}>{msg.text}</p>}
+            <label className="block text-xs text-muted">Horário
+        <input type="time" step={300} value={time} onChange={(e) => setTime(e.target.value)} required className={`${field} mt-1`} />
+      </label>
+      {date && (
+        <div>
+          <div className="mb-1 text-xs text-muted">Horários livres (toque para preencher)</div>
+          {loading && <p className="text-sm text-muted">Buscando horários…</p>}
+          {!loading && slots && slots.length === 0 && <p className="text-sm text-muted">Sem horários livres nesse dia. Escolha outra data (confira os dias de atendimento do especialista).</p>}
+          <div className="flex flex-wrap gap-1.5">
+            {slots?.map((s) => {
+              const hm = s.label.replace(/ \(.*\)$/, "").slice(0, 5);
+              return <button key={s.startTime} type="button" onClick={() => setTime(hm)} className={`chip border ${time === hm ? "border-brand bg-brand text-white" : "border-line bg-white"}`}>{hm}</button>;
+            })}
+          </div>
+          {slots && slots.length > 0 && time && !slots.some((s) => s.label.replace(/ \(.*\)$/, "").slice(0, 5) === time) && <p className="mt-2 text-xs text-warn">Esse horário não está livre: escolha um dos horários acima.</p>}
+        </div>
+      )}
+      {msg && <p className={`rounded-lg px-3 py-2 text-sm ${msg.ok ? "bg-ok-soft text-green-800" : "bg-bad-soft text-bad"}`}>{msg.text}</p>}
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancelar</button>
-              <button className="btn btn-primary" disabled={pending || !slot || !name || !phone}>{pending ? "Agendando…" : "Confirmar agendamento"}</button>
+              <button className="btn btn-primary" disabled={pending || !date || !time || !name || !phone}>{pending ? "Agendando…" : "Confirmar agendamento"}</button>
             </div>
           </form>
         </div>
