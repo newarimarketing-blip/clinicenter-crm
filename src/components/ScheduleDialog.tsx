@@ -17,6 +17,7 @@ export function ScheduleDialog({ profs, defaultProf }: { profs: Prof[]; defaultP
   const [date, setDate] = useState("");
   const [slots, setSlots] = useState<SlotOption[] | null>(null);
   const [time, setTime] = useState("");
+  const [weeks, setWeeks] = useState(1);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [pending, start] = useTransition();
@@ -38,11 +39,13 @@ export function ScheduleDialog({ profs, defaultProf }: { profs: Prof[]; defaultP
     e.preventDefault();
     setMsg(null);
     start(async () => {
-      const r = await bookAppointment({ name, phone, profKey: prof, date, time, insurance });
+      const r = await bookAppointment({ name, phone, profKey: prof, date, time, insurance, weeks });
       if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Não foi possível agendar." });
-      setMsg({ ok: true, text: r.newClient ? "Consulta agendada e novo cliente cadastrado!" : "Consulta agendada!" });
+      const base = (r.created ?? 1) > 1 ? `${r.created} consultas semanais agendadas` : "Consulta agendada";
+      const skip = r.skipped?.length ? ` Puladas: ${r.skipped.join(", ")}.` : "";
+      setMsg({ ok: true, text: `${base}${r.newClient ? " e novo cliente cadastrado" : ""}!${skip}` });
       router.refresh();
-      setTimeout(() => { setOpen(false); setMsg(null); setName(""); setPhone(""); setInsurance(""); setDate(""); setTime(""); }, 1400);
+      setTimeout(() => { setOpen(false); setWeeks(1); setMsg(null); setName(""); setPhone(""); setInsurance(""); setDate(""); setTime(""); }, r.skipped?.length ? 4500 : 1400);
     });
   }
 
@@ -80,6 +83,12 @@ export function ScheduleDialog({ profs, defaultProf }: { profs: Prof[]; defaultP
             <label className="block text-xs text-muted">Horário
         <input type="time" step={300} value={time} onChange={(e) => setTime(e.target.value)} required className={`${field} mt-1`} />
       </label>
+      <label className="block text-xs text-muted">Repetição
+        <select value={weeks} onChange={(e) => setWeeks(Number(e.target.value))} className={`${field} mt-1`}>
+          <option value={1}>Consulta única</option>
+          {[4, 8, 12, 16, 24, 52].map((n) => <option key={n} value={n}>Toda semana, no mesmo dia e horário — {n} consultas</option>)}
+        </select>
+      </label>
       {date && (
         <div>
           <div className="mb-1 text-xs text-muted">Horários livres (toque para preencher)</div>
@@ -97,7 +106,7 @@ export function ScheduleDialog({ profs, defaultProf }: { profs: Prof[]; defaultP
       {msg && <p className={`rounded-lg px-3 py-2 text-sm ${msg.ok ? "bg-ok-soft text-green-800" : "bg-bad-soft text-bad"}`}>{msg.text}</p>}
             <div className="flex justify-end gap-2 pt-1">
               <button type="button" className="btn" onClick={() => setOpen(false)} disabled={pending}>Cancelar</button>
-              <button className="btn btn-primary" disabled={pending || !date || !time || !name || !phone}>{pending ? "Agendando…" : "Confirmar agendamento"}</button>
+              <button className="btn btn-primary" disabled={pending || !date || !time || !name || !phone}>{pending ? "Agendando…" : weeks > 1 ? `Agendar ${weeks} consultas` : "Confirmar agendamento"}</button>
             </div>
           </form>
         </div>
