@@ -1,6 +1,6 @@
 "use server";
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { backTo } from "@/lib/aba";
 import { isDemo, supabaseServer } from "@/lib/supabase-server";
 import { admin } from "@/lib/supabase-admin";
 import { currentMe } from "@/lib/roles";
@@ -11,7 +11,7 @@ import { closeWaitlist } from "@/lib/waitlist";
 
 /* ---------- Equipe: criar usuário com senha, editar permissão/senha, excluir ---------- */
 
-const back = (q: string): never => redirect(`/configuracoes?${q}`);
+const back = (q: string): Promise<never> => backTo("/configuracoes", q);
 const fail = (m: string) => back("erro=" + encodeURIComponent(m));
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
