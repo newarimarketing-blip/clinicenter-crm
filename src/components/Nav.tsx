@@ -10,6 +10,7 @@ const items = [
   { href: "/consultas", label: "Consultas" },
   { href: "/relatorios", label: "Relatórios" },
   { href: "/script", label: "Script da IA" },
+  { href: "/whatsapp", label: "WhatsApp" },
   { href: "/configuracoes", label: "Configurações" },
 ];
 
