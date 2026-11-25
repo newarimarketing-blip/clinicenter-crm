@@ -10,6 +10,7 @@ import { activeAppointment, cancelById, cancelLatest, confirmAppointment, create
 import { areasBlock, areasSentence, getClinicSettings, guidanceBlock, type ClinicSettings } from "./clinic-settings";
 import { advanceStage, logEvent, updateLead } from "./leads";
 import { fmtDateTime, todayLabel } from "./time";
+import { absenceNotices } from "./absences";
 import { closeWaitlist, declineOffer, joinWaitlist, pendingOffer, waitingCount } from "./waitlist";
 import type { Lead, Message } from "./types";
 
@@ -295,6 +296,12 @@ export async function runAgent(leadId: string): Promise<void> {
     ? `\n\n# LISTA DE ESPERA\nEste paciente já está na lista de espera de: ${waiting.map((w) => cfg.professionals.find((x) => x.key === w.professional_key)?.name ?? w.professional_key).join(", ")}. Se perguntar, diga que está na lista e será avisado assim que surgir vaga; não peça para entrar de novo.`
     : "";
 
+  const notices = await absenceNotices(leadId).catch(() => []);
+  const absenceBlock = notices.length
+    ? `\n\n# AVISO DE FALTA DO PROFISSIONAL\nA clínica já avisou este paciente por WhatsApp que ${notices.map((n) => `${n.professional} não poderá atender em ${fmtDateTime(n.starts_at)} (consulta desmarcada)`).join("; ")}. ` +
+      `Se ele responder: acolha, peça desculpas pelo transtorno, chame consultar_horarios (calendar_hint do mesmo profissional, ou outro se ele preferir) e ofereça até 3 opções; quando escolher, use agendar_consulta. Não diga que a consulta antiga continua marcada.`
+    : "";
+
   const keys = (cfg.professionals.length ? cfg.professionals.map((p) => p.key) : ["nenhum"]) as [string, ...string[]];
   const tools = buildTools(keys, [...cfg.specialties, "outra"]);
   // Áreas atuais ficam no FIM do prompt (maior peso) e valem mesmo que o histórico tenha listado outras áreas.
@@ -303,7 +310,7 @@ export async function runAgent(leadId: string): Promise<void> {
     `BOAS-VINDAS (sempre): em toda saudação, seja o paciente novo ou antigo, conhecido ou não no CRM, e mesmo que o CRM já traga uma especialidade, apresente-se e liste as especialidades atuais exatamente assim: "Em qual área você precisa de ajuda: ${areasSentence(cfg)}?". ` +
     `Na saudação cite SOMENTE as especialidades, nunca o nome de nenhum profissional (os nomes só aparecem depois, ao oferecer horários). Só pule a lista se a mensagem do paciente já disser a especialidade desejada. ` +
     `Esta lista é a ÚNICA válida agora: ignore listas diferentes que apareçam em mensagens anteriores desta conversa ou no roteiro, pois a clínica atualizou suas áreas.`;
-  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock + offerBlock + waitBlock + areasPrompt }, ...toChat(history)];
+  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock + absenceBlock + offerBlock + waitBlock + areasPrompt }, ...toChat(history)];
   // Saudação determinística: só especialidades ativas, nunca nomes de profissionais (vale para lead novo ou antigo).
   const lastIn = [...history].reverse().find((m) => m.role === "lead")?.content ?? "";
   let reply =

@@ -26,7 +26,7 @@ export function calendarClient() {
 }
 
 export const calendarId = (p: Professional) => p.calendarId ?? (p.calEnv ? process.env[p.calEnv] : undefined);
-const findProf = async (key: string) => (await getClinicSettings()).professionals.find((p) => p.key === key);
+export const findProf = async (key: string) => (await getClinicSettings()).professionals.find((p) => p.key === key);
 
 type Interval = { start: number; end: number };
 
@@ -89,6 +89,16 @@ export async function freeSlots(p: Professional, q: SlotQuery = {}, limit = 6): 
     }
   }
   if (!candidates.length) return [];
+  // dias de falta do profissional não têm vaga
+  const { absenceRanges } = await import("./absences");
+  const away = await absenceRanges(p.key);
+  if (away.length) {
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const day = candidates[i].startTime.slice(0, 10);
+      if (away.some((a) => day >= a.from && day <= a.to)) candidates.splice(i, 1);
+    }
+    if (!candidates.length) return [];
+  }
   const busy = await busyIntervals(p, new Date(candidates[0].s), new Date(candidates[candidates.length - 1].e));
   const free = candidates.filter((c) => !busy.some((b) => c.s < b.end && c.e > b.start));
   const picked = spreadAcrossDays(free, limit);
@@ -154,14 +164,14 @@ export async function cancelLatest(leadId: string, calendarHint?: string) {
 
 type Appt = { id: string; professional: string; calendar_hint: string; starts_at: string; gcal_event_id: string | null };
 
-export async function cancelById(appt: Appt, status: "cancelado" | "remarcado" = "cancelado") {
+export async function cancelById(appt: Appt, status: "cancelado" | "remarcado" = "cancelado", notifyWaitlist = true) {
   const cal = calendarClient();
   const p = await findProf(appt.calendar_hint);
   const id = p ? calendarId(p) : undefined;
   if (cal && id && appt.gcal_event_id) await cal.events.delete({ calendarId: id, eventId: appt.gcal_event_id }).catch(() => {});
   await admin().from("appointments").update({ status }).eq("id", appt.id);
   // a vaga que abriu vai para o 1º da lista de espera (import dinâmico: waitlist.ts também usa agenda.ts)
-  try {
+  if (notifyWaitlist) try {
     const { offerFreedSlot } = await import("./waitlist");
     await offerFreedSlot(appt.calendar_hint, appt.starts_at);
   } catch (e) {
