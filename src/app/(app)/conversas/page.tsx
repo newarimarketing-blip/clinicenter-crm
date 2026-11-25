@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { getLeads, getMessages } from "@/lib/data";
 import { isDemo } from "@/lib/supabase-server";
+import { Tabs } from "@/components/Tabs";
+import { ScriptPanel } from "@/components/ScriptPanel";
 import { Thread } from "@/components/Thread";
 import { SpecialtyChip, StageChip } from "@/components/ui";
 import { initials, isPaused, phoneFmt, relTime } from "@/lib/format";
@@ -8,8 +10,17 @@ import { sendHumanMessage, setAiPaused } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function Conversas({ searchParams }: { searchParams: Promise<{ lead?: string }> }) {
-  const { lead: sel } = await searchParams;
+export default async function Conversas({ searchParams }: { searchParams: Promise<{ lead?: string; aba?: string }> }) {
+  const { lead: sel, aba } = await searchParams;
+  const tabs = [{ id: "conversas", label: "Conversas" }, { id: "script", label: "Script da IA" }];
+  if (aba === "script") {
+    return (
+      <div className="space-y-5">
+        <Tabs base="/conversas" current="script" tabs={tabs} />
+        <ScriptPanel />
+      </div>
+    );
+  }
   // com ?lead= já na URL, busca lista e mensagens ao mesmo tempo
   const [allLeads, early] = await Promise.all([getLeads(), sel ? getMessages(sel) : Promise.resolve(null)]);
   const leads = allLeads.filter((l) => l.last_message_at);
@@ -18,7 +29,9 @@ export default async function Conversas({ searchParams }: { searchParams: Promis
   const paused = current ? isPaused(current.ai_paused_until) : false;
 
   return (
-    <div className="card flex h-[calc(100vh-4rem)] min-h-[520px] overflow-hidden">
+    <div className="space-y-3">
+    <Tabs base="/conversas" current="conversas" tabs={tabs} />
+    <div className="card flex h-[calc(100vh-7.5rem)] min-h-[480px] overflow-hidden">
       <aside className="w-72 shrink-0 overflow-y-auto border-r border-line">
         {leads.map((l) => (
           <Link key={l.id} href={`/conversas?lead=${l.id}`} className={`flex gap-3 border-b border-line px-3 py-3 ${l.id === current?.id ? "bg-brand-soft/60" : "hover:bg-black/[0.03]"}`}>
@@ -64,6 +77,7 @@ export default async function Conversas({ searchParams }: { searchParams: Promis
       ) : (
         <p className="m-auto text-sm text-muted">Nenhuma conversa ainda.</p>
       )}
+    </div>
     </div>
   );
 }
