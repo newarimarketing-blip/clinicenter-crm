@@ -5,12 +5,11 @@ import { usePathname } from "next/navigation";
 const items = [
   { href: "/", label: "Painel" },
   { href: "/agenda", label: "Agenda" },
+  { href: "/clientes", label: "Clientes" },
   { href: "/funil", label: "Funil" },
   { href: "/conversas", label: "Conversas" },
   { href: "/consultas", label: "Consultas" },
   { href: "/relatorios", label: "Relatórios" },
-  { href: "/script", label: "Script da IA" },
-  { href: "/whatsapp", label: "WhatsApp" },
   { href: "/configuracoes", label: "Configurações" },
 ];
 
