@@ -109,7 +109,7 @@ const normPhone = (v: string) => {
 const hmLocal = (iso: string) => new Date(+new Date(iso) - 3 * 3600e3).toISOString().slice(11, 16); // relógio de Fortaleza (UTC-3)
 
 /** Cria a consulta (banco + Google Calendar). Exige data e hora; se o cliente ainda não existe, cadastra. */
-export async function bookAppointment(input: { name: string; phone: string; profKey: string; date: string; time: string; insurance?: string }): Promise<{ ok: boolean; error?: string; newClient?: boolean; leadId?: string }> {
+export async function bookAppointment(input: { name: string; phone: string; profKey: string; date: string; time: string; insurance?: string; weeks?: number }): Promise<{ ok: boolean; error?: string; newClient?: boolean; leadId?: string; created?: number; skipped?: string[] }> {
   const user = await loggedIn();
   if (!user) return { ok: false, error: isDemo ? "Modo demonstração: nada é salvo." : "Sessão expirada. Entre de novo." };
   const name = input.name.trim();
@@ -121,25 +121,44 @@ export async function bookAppointment(input: { name: string; phone: string; prof
   const p = (await getClinicSettings()).professionals.find((x) => x.key === input.profKey);
   if (!p) return { ok: false, error: "Escolha o especialista." };
   try {
-    const free = await freeSlots(p, { date: input.date }, 100);
-    const slot = free.find((s) => hmLocal(s.startTime) === input.time);
-    if (!slot) {
+    const weeks = Math.min(Math.max(Math.floor(input.weeks ?? 1), 1), 52); // consultas fixas semanais: total de semanas, contando a primeira
+    const dateAt = (k: number) => new Date(+new Date(`${input.date}T12:00:00Z`) + k * 7 * 86400e3).toISOString().slice(0, 10);
+    const pickSlot = async (date: string) => (await freeSlots(p, { date }, 100)).find((s) => hmLocal(s.startTime) === input.time) ?? null;
+    const first = await pickSlot(input.date);
+    if (!first) {
+      const free = await freeSlots(p, { date: input.date }, 100);
       const opts = free.map((s) => hmLocal(s.startTime)).slice(0, 8).join(", ");
       return { ok: false, error: `${input.time} não está livre nesse dia.${opts ? ` Horários livres: ${opts}.` : " Não há horários livres nessa data."}` };
     }
     const { data: existingLead } = await admin().from("leads").select("id").eq("phone", phone).maybeSingle();
     const lead = await upsertLead(phone, name);
-    const existing = await activeAppointment(lead.id, p.key);
-    if (existing) return { ok: false, error: `Esse paciente já tem consulta com ${existing.professional} marcada para ${new Date(existing.starts_at).toLocaleString("pt-BR", { timeZone: "America/Fortaleza", dateStyle: "short", timeStyle: "short" })}.` };
-    const appt = await createAppointment({ leadId: lead.id, patient: name, phone, p, slot, by: user.email ?? "equipe" });
+    if (weeks === 1) {
+      const existing = await activeAppointment(lead.id, p.key);
+      if (existing) return { ok: false, error: `Esse paciente já tem consulta com ${existing.professional} marcada para ${new Date(existing.starts_at).toLocaleString("pt-BR", { timeZone: "America/Fortaleza", dateStyle: "short", timeStyle: "short" })}.` };
+    }
+    let created = 0;
+    const skipped: string[] = [];
+    for (let k = 0; k < weeks; k++) {
+      const date = dateAt(k);
+      const fmt = `${date.slice(8, 10)}/${date.slice(5, 7)}`;
+      const slot = k === 0 ? first : await pickSlot(date);
+      if (!slot) { skipped.push(`${fmt} (sem vaga nesse horário)`); continue; }
+      try {
+        const appt = await createAppointment({ leadId: lead.id, patient: name, phone, p, slot, by: user.email ?? "equipe" });
+        created++;
+        await logEvent(lead.id, "appointment_created", { id: appt.id, starts_at: slot.startTime, professional: p.name, by: user.email ?? "equipe", new_client: k === 0 && !existingLead, recurring: weeks > 1 });
+      } catch {
+        skipped.push(`${fmt} (erro ao criar)`);
+      }
+    }
+    if (!created) return { ok: false, error: "Nenhuma consulta foi criada: " + skipped.join(", ") };
     await updateLead(lead, { patient_name: name, specialty: p.specialty, stage: "agendado", score: 100, ...(input.insurance?.trim() ? { insurance: input.insurance.trim() } : {}) });
-    await logEvent(lead.id, "appointment_created", { id: appt.id, starts_at: slot.startTime, professional: p.name, by: user.email ?? "equipe", new_client: !existingLead });
     await closeWaitlist(lead.id, p.key, "agendado").catch(() => {});
     revalidatePath("/agenda");
     revalidatePath("/funil");
     revalidatePath("/consultas");
     revalidatePath("/clientes");
-    return { ok: true, newClient: !existingLead, leadId: lead.id };
+    return { ok: true, newClient: !existingLead, leadId: lead.id, created, skipped };
   } catch (e) {
     return { ok: false, error: "Não foi possível agendar: " + String(e instanceof Error ? e.message : e).slice(0, 160) };
   }
