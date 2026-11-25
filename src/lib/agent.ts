@@ -10,6 +10,7 @@ import { activeAppointment, cancelById, cancelLatest, confirmAppointment, create
 import { areasBlock, areasSentence, getClinicSettings, guidanceBlock, type ClinicSettings } from "./clinic-settings";
 import { advanceStage, logEvent, updateLead } from "./leads";
 import { fmtDateTime, todayLabel } from "./time";
+import { closeWaitlist, declineOffer, joinWaitlist, pendingOffer, waitingCount } from "./waitlist";
 import type { Lead, Message } from "./types";
 
 const HISTORY_LIMIT = 40;
@@ -75,6 +76,31 @@ const buildTools = (keys: [string, ...string[]], specialties: string[]): ChatCom
       name: "confirmar_consulta",
       description: "Registra que o paciente CONFIRMOU presença na consulta já marcada (ex.: respondeu 'sim', 'confirmo', 'estarei lá' ao lembrete). Não use para agendar.",
       parameters: { type: "object", properties: { calendar_hint: { type: "string", enum: keys } }, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "entrar_lista_espera",
+      description: "Guarda o pedido de horário do paciente quando NÃO há vaga que sirva (consultar_horarios vazio ou ele recusou todas as opções). Se uma vaga abrir (cancelamento), o sistema avisa o paciente por WhatsApp. Só chame depois de o paciente concordar em ficar na lista.",
+      parameters: {
+        type: "object",
+        properties: {
+          calendar_hint: { type: "string", enum: keys },
+          periodo: { type: "string", enum: ["manha", "tarde", "noite"], description: "Só se o paciente indicar período preferido" },
+          dia_semana: { type: "string", enum: ["segunda", "terca", "quarta", "quinta", "sexta", "sabado"], description: "Só se o paciente indicar dia preferido" },
+          observacao: { type: "string", description: "Detalhe do pedido (ex.: 'só depois das 17h')" },
+        },
+        required: ["calendar_hint"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "recusar_vaga_lista_espera",
+      description: "O paciente NÃO quer a vaga que você ofereceu da lista de espera. sair_da_lista=true se ele não quiser mais esperar; false se quiser continuar aguardando outra vaga.",
+      parameters: { type: "object", properties: { sair_da_lista: { type: "boolean" } }, required: ["sair_da_lista"] },
     },
   },
   {
@@ -150,6 +176,7 @@ async function runTool(name: string, rawArgs: string, ctx: Ctx): Promise<unknown
       const appt = await createAppointment({ leadId: ctx.lead.id, patient, phone: ctx.lead.phone, p, slot });
       ctx.lead = await updateLead(ctx.lead, { patient_name: patient, email: args.email ?? ctx.lead.email, specialty: p.specialty, stage: "agendado", score: 100 });
       await logEvent(ctx.lead.id, "appointment_created", { id: appt.id, starts_at: slot.startTime, professional: p.name });
+      await closeWaitlist(ctx.lead.id, p.key, "agendado").catch(() => {}); // saiu da fila: conseguiu horário
       await alertTeam(`✅ Consulta agendada\n${patient} — ${p.name}\n${slot.label}\nwa.me/${ctx.lead.phone}`);
       return { ok: true, profissional: p.name, horario: slot.label };
     }
@@ -177,6 +204,17 @@ async function runTool(name: string, rawArgs: string, ctx: Ctx): Promise<unknown
       if (!appt) return { erro: "nenhuma consulta ativa para confirmar" };
       await logEvent(ctx.lead.id, "appointment_confirmed", { id: appt.id, starts_at: appt.starts_at });
       return { ok: true, profissional: appt.professional, horario: fmtDateTime(appt.starts_at) };
+    }
+    case "entrar_lista_espera": {
+      if (!p) return { erro: "calendar_hint inválido" };
+      await joinWaitlist(ctx.lead.id, p.key, args.periodo, args.dia_semana, args.observacao);
+      await logEvent(ctx.lead.id, "waitlist_joined", { professional: p.name, periodo: args.periodo ?? null, dia_semana: args.dia_semana ?? null });
+      await alertTeam(`📋 Lista de espera\n${ctx.lead.patient_name ?? ctx.lead.name ?? ""} — ${p.name}${args.dia_semana ? ` (${args.dia_semana})` : ""}${args.periodo ? ` (${args.periodo})` : ""}\nwa.me/${ctx.lead.phone}`);
+      return { ok: true, profissional: p.name };
+    }
+    case "recusar_vaga_lista_espera": {
+      await declineOffer(ctx.lead.id, Boolean(args.sair_da_lista));
+      return { ok: true };
     }
     case "atualizar_lead": {
       const patch = updateSchema.parse(args);
@@ -235,6 +273,7 @@ export async function runAgent(leadId: string): Promise<void> {
     `- Nunca diga que um horário está disponível/confirmado sem ter chamado consultar_horarios ou agendar_consulta nesta mesma rodada.\n` +
     `- Se o horário escolhido não estiver mais livre, diga com clareza que ele acabou de ser ocupado e ofereça só as opções novas e atuais (nunca repita a lista antiga nem a mesma pergunta duas vezes seguidas).\n` +
     `- Se o paciente responder "pode ser", "ok" ou "sim" a UMA proposta sua de horário, agende exatamente esse horário.\n` +
+    `- LISTA DE ESPERA: se não houver horário que sirva (consultar_horarios vazio, ou o paciente recusou todas as opções e ainda quer outro dia/período), diga com clareza que não há vaga agora e ofereça colocá-lo na lista de espera: "se alguma vaga abrir, eu te aviso por aqui". Só depois do "sim" chame entrar_lista_espera (com o período/dia que ele quis). Não prometa vaga nem horário.\n` +
     `- Só chame cancelar_consulta depois que o paciente disser claramente, nesta conversa, que quer cancelar (e, havendo mais de uma consulta, qual delas). Na dúvida, pergunte antes; nunca cancele por iniciativa própria.`;
 
   const upcoming = await upcomingAppointments(leadId);
@@ -242,6 +281,18 @@ export async function runAgent(leadId: string): Promise<void> {
     ? `\n\n# CONSULTAS MARCADAS DESTE PACIENTE\n${upcoming.map((a) => `- ${a.professional} (calendar_hint="${a.calendar_hint}"): ${fmtDateTime(a.starts_at)}${a.confirmed_at ? " — presença já confirmada" : a.reminder_sent_at ? " — lembrete enviado, aguardando confirmação" : ""}`).join("\n")}\n` +
       `Se o paciente confirmar presença (sim, confirmo, estarei lá): chame confirmar_consulta e agradeça em uma frase, sem repetir tudo.\n` +
       `Se disser que NÃO pode ir ou pedir outro horário: seja acolhedora, chame consultar_horarios, ofereça até 3 opções e, quando escolher, use reagendar_consulta (o horário antigo volta sozinho para a agenda). Se desistir de vez, use cancelar_consulta e deixe a porta aberta para voltar.`
+    : "";
+
+  const offer = await pendingOffer(leadId).catch(() => null);
+  const offerProf = offer ? cfg.professionals.find((x) => x.key === offer.professional_key) : undefined;
+  const offerBlock = offer && offerProf
+    ? `\n\n# VAGA OFERECIDA DA LISTA DE ESPERA (aguardando resposta)\nVocê acabou de avisar este paciente que abriu uma vaga com ${offerProf.name} (calendar_hint="${offerProf.key}") em ${fmtDateTime(offer.startTime)} — startTime exato: ${offer.startTime}.\n` +
+      `Se ele aceitar (sim, quero, pode marcar, fechado): chame agendar_consulta com esse startTime (se ainda não souber o nome do paciente, peça só o nome antes). Se a vaga já tiver sido ocupada, avise e ofereça as opções atuais.\n` +
+      `Se recusar ou disser que não serve: chame recusar_vaga_lista_espera (sair_da_lista=true só se ele não quiser mais esperar) e agradeça com carinho.`
+    : "";
+  const waiting = !offer ? await waitingCount(leadId).catch(() => []) : [];
+  const waitBlock = waiting.length
+    ? `\n\n# LISTA DE ESPERA\nEste paciente já está na lista de espera de: ${waiting.map((w) => cfg.professionals.find((x) => x.key === w.professional_key)?.name ?? w.professional_key).join(", ")}. Se perguntar, diga que está na lista e será avisado assim que surgir vaga; não peça para entrar de novo.`
     : "";
 
   const keys = (cfg.professionals.length ? cfg.professionals.map((p) => p.key) : ["nenhum"]) as [string, ...string[]];
@@ -252,7 +303,7 @@ export async function runAgent(leadId: string): Promise<void> {
     `BOAS-VINDAS (sempre): em toda saudação, seja o paciente novo ou antigo, conhecido ou não no CRM, e mesmo que o CRM já traga uma especialidade, apresente-se e liste as especialidades atuais exatamente assim: "Em qual área você precisa de ajuda: ${areasSentence(cfg)}?". ` +
     `Na saudação cite SOMENTE as especialidades, nunca o nome de nenhum profissional (os nomes só aparecem depois, ao oferecer horários). Só pule a lista se a mensagem do paciente já disser a especialidade desejada. ` +
     `Esta lista é a ÚNICA válida agora: ignore listas diferentes que apareçam em mensagens anteriores desta conversa ou no roteiro, pois a clínica atualizou suas áreas.`;
-  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock + areasPrompt }, ...toChat(history)];
+  const messages: ChatCompletionMessageParam[] = [{ role: "system", content: system + apptBlock + offerBlock + waitBlock + areasPrompt }, ...toChat(history)];
   // Saudação determinística: só especialidades ativas, nunca nomes de profissionais (vale para lead novo ou antigo).
   const lastIn = [...history].reverse().find((m) => m.role === "lead")?.content ?? "";
   let reply =

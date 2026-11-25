@@ -4,6 +4,7 @@ import { STAGES, STAGE_LABEL } from "@/lib/clinic-config";
 import { getClinicSettings } from "@/lib/clinic-settings";
 import { LeadPanel } from "@/components/LeadPanel";
 import { SpecialtyChip } from "@/components/ui";
+import { KanbanColumn, DraggableCard } from "@/components/Kanban";
 import { StageSelect } from "@/components/StageSelect";
 import { AttendanceButtons } from "@/components/AttendanceButtons";
 import { isPaused, relTime } from "@/lib/format";
@@ -31,7 +32,7 @@ export default async function Funil({ searchParams }: { searchParams: Promise<{ 
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Funil</h1>
-          <p className="text-sm text-muted">O agente move os leads de etapa sozinho. Você pode ajustar manualmente.</p>
+          <p className="text-sm text-muted">O agente move os leads de etapa sozinho. Você também pode arrastar os cartões entre as colunas.</p>
         </div>
         <div className="flex flex-wrap gap-1.5">
           <Link href="/funil" className={`chip border ${!esp ? "border-brand bg-brand-soft text-brand" : "border-line bg-white text-muted"}`}>Todas</Link>
@@ -52,9 +53,10 @@ export default async function Funil({ searchParams }: { searchParams: Promise<{ 
                 <h2 className="text-sm font-semibold">{STAGE_LABEL[s]}</h2>
                 <span className="text-xs tabular-nums text-muted">{col.length}</span>
               </div>
-              <div className="space-y-2">
+              <KanbanColumn stage={s}>
                 {col.map((l) => (
-                  <article key={l.id} className="card p-3">
+                  <DraggableCard key={l.id} leadId={l.id} stage={s}>
+                  <article className="card p-3">
                     <Link href={`${base}${base.includes("?") ? "&" : "?"}lead=${l.id}`} scroll={false} className="block">
                       <div className="flex items-start justify-between gap-2">
                         <span className="font-medium leading-tight">{l.name ?? l.phone}</span>
@@ -76,8 +78,9 @@ export default async function Funil({ searchParams }: { searchParams: Promise<{ 
                       <StageSelect leadId={l.id} stage={l.stage} />
                     </div>
                   </article>
+                  </DraggableCard>
                 ))}
-              </div>
+              </KanbanColumn>
             </section>
           );
         })}

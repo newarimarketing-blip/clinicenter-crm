@@ -26,3 +26,18 @@ export async function listRoles(): Promise<RoleRow[]> {
   const { data } = await admin().from("user_roles").select("email, role").order("email");
   return (data ?? []) as RoleRow[];
 }
+
+export type TeamMember = { email: string; role: Role; hasRole: boolean; lastSignIn: string | null };
+
+/** Usuários do login (Supabase Auth) com o papel de cada um. Quem não tem papel entra como recepção. */
+export async function listTeam(): Promise<TeamMember[]> {
+  if (isDemo) return [];
+  const [{ data: users }, roles] = await Promise.all([admin().auth.admin.listUsers({ page: 1, perPage: 200 }), listRoles()]);
+  const byEmail = new Map(roles.map((r) => [r.email, r.role]));
+  const out: TeamMember[] = (users?.users ?? [])
+    .filter((u) => u.email)
+    .map((u) => ({ email: u.email!.toLowerCase(), role: byEmail.get(u.email!.toLowerCase()) ?? "recepcao", hasRole: byEmail.has(u.email!.toLowerCase()), lastSignIn: u.last_sign_in_at ?? null }));
+  // papéis cadastrados sem usuário no login (e-mail ainda não criado)
+  for (const r of roles) if (!out.some((m) => m.email === r.email)) out.push({ email: r.email, role: r.role, hasRole: true, lastSignIn: null });
+  return out.sort((a, b) => a.email.localeCompare(b.email));
+}

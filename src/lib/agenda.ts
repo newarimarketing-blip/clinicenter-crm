@@ -116,8 +116,8 @@ export async function resolveSlot(p: Professional, startTime: string): Promise<S
   return slots.find((s) => +new Date(s.startTime) === +new Date(startTime)) ?? null;
 }
 
-export async function createAppointment(opts: { leadId: string; patient: string; phone: string; p: Professional; slot: Slot }) {
-  const { leadId, patient, phone, p, slot } = opts;
+export async function createAppointment(opts: { leadId: string; patient: string; phone: string; p: Professional; slot: Slot; by?: string }) {
+  const { leadId, patient, phone, p, slot, by } = opts;
   let gcal_event_id: string | null = null;
   const cal = calendarClient();
   const id = calendarId(p);
@@ -126,7 +126,7 @@ export async function createAppointment(opts: { leadId: string; patient: string;
       calendarId: id,
       requestBody: {
         summary: patient, // mesma convenção da agenda atual: título = nome do paciente
-        description: `Whatsapp: https://wa.me/${phone}\nAgendado pela Marcelia (IA)`,
+        description: `Whatsapp: https://wa.me/${phone}\n${by ? `Agendado pelo portal da clínica` : "Agendado pela Marcelia (IA)"}`,
         start: { dateTime: slot.startTime, timeZone: CLINIC.tz },
         end: { dateTime: slot.endTime, timeZone: CLINIC.tz },
       },
@@ -160,6 +160,13 @@ export async function cancelById(appt: Appt, status: "cancelado" | "remarcado" =
   const id = p ? calendarId(p) : undefined;
   if (cal && id && appt.gcal_event_id) await cal.events.delete({ calendarId: id, eventId: appt.gcal_event_id }).catch(() => {});
   await admin().from("appointments").update({ status }).eq("id", appt.id);
+  // a vaga que abriu vai para o 1º da lista de espera (import dinâmico: waitlist.ts também usa agenda.ts)
+  try {
+    const { offerFreedSlot } = await import("./waitlist");
+    await offerFreedSlot(appt.calendar_hint, appt.starts_at);
+  } catch (e) {
+    console.error("lista de espera", e);
+  }
   return appt;
 }
 
