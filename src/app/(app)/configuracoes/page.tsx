@@ -1,6 +1,8 @@
 import { getClinicSettings, DOW_SHORT, insuranceToText, scheduleByPeriod, type ProfessionalRow } from "@/lib/clinic-settings";
 import { currentMe, listTeam } from "@/lib/roles";
 import { calendarId } from "@/lib/agenda";
+import { Tabs } from "@/components/Tabs";
+import { WhatsAppConnect } from "@/components/WhatsAppConnect";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { createCalendarFor, createProfessional, deleteProfessional, deleteService, restoreDefaults, saveInsurance, saveService, updateProfessional } from "@/app/actions";
 import { createTeamUser, deleteTeamUser, updateTeamUser } from "@/app/team-actions";
@@ -55,9 +57,11 @@ function ScheduleFields({ p, disabled }: { p?: ProfessionalRow; disabled?: boole
   );
 }
 
-export default async function Configuracoes({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; aviso?: string }> }) {
-  const { ok, erro, aviso } = await searchParams;
+export default async function Configuracoes({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; aviso?: string; aba?: string }> }) {
+  const { ok, erro, aviso, aba: abaQ } = await searchParams;
   const [cfg, me, team] = await Promise.all([getClinicSettings(), currentMe(), listTeam()]);
+  const TABS = [{ id: "especialistas", label: "Especialistas" }, { id: "servicos", label: "Serviços e valores" }, { id: "convenios", label: "Convênios" }, ...(me.role === "gestor" ? [{ id: "equipe", label: "Equipe e acessos" }] : []), { id: "whatsapp", label: "WhatsApp" }];
+  const aba = TABS.some((t) => t.id === abaQ) ? abaQ! : "especialistas";
   const edit = me.role === "gestor";
   const tablesOk = cfg.tables.professionals && cfg.tables.services;
   const lock = !edit || !tablesOk;
@@ -67,7 +71,7 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Configurações</h1>
         <p className="max-w-2xl text-sm text-muted">
-          Especialistas, serviços, valores e convênios que a Marcelia usa nas conversas. Vale na hora, sem novo deploy. A IA do aprendizado nunca altera estes dados.
+          Cada aba cuida de uma parte: especialistas, serviços, convênios, equipe e o WhatsApp da clínica. O que a Marcelia usa nas conversas. Vale na hora, sem novo deploy. A IA do aprendizado nunca altera estes dados.
         </p>
       </header>
 
@@ -81,7 +85,10 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
         </p>
       )}
 
+      <Tabs base="/configuracoes" current={aba} tabs={TABS} />
+
       {/* ---------- Especialistas ---------- */}
+      {aba === "especialistas" && (
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Especialistas e agendas</h2>
         <p className="max-w-2xl text-xs text-muted">
@@ -146,7 +153,10 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
         </div>
       </section>
 
+      )}
+
       {/* ---------- Serviços ---------- */}
+      {aba === "servicos" && (
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Serviços e valores</h2>
         <p className="max-w-2xl text-xs text-muted">Cada linha vira um valor que a Marcelia pode informar. Ela nunca inventa preço fora desta lista.</p>
@@ -201,7 +211,10 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
         </div>
       </section>
 
+      )}
+
       {/* ---------- Convênios ---------- */}
+      {aba === "convenios" && (
       <section className="card p-5">
         <div className="mb-2 flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold">Convênios</h2>
@@ -221,8 +234,10 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
         </form>
       </section>
 
+      )}
+
       {/* ---------- Equipe ---------- */}
-      {edit && (
+      {aba === "equipe" && edit && (
         <section className="card p-5">
           <h2 className="mb-1 text-sm font-semibold">Equipe e permissões</h2>
           <p className="mb-4 max-w-2xl text-xs text-muted">
@@ -272,6 +287,14 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
               <button className="btn btn-primary">Criar usuário</button>
             </form>
           </details>
+        </section>
+      )}
+
+      {aba === "whatsapp" && (
+        <section className="max-w-3xl space-y-4">
+          <p className="text-sm text-muted">Conecte o número da clínica à Marcelia. Ao gerar o QR Code, o sistema também aponta o webhook da Evolution para este portal.</p>
+          <WhatsAppConnect />
+          <p className="text-xs text-muted">Use o número do WhatsApp (ou WhatsApp Business) da clínica. Se trocar de número, desconecte e gere um novo QR Code.</p>
         </section>
       )}
     </div>
