@@ -1,8 +1,9 @@
 import { getClinicSettings, DOW_SHORT, insuranceToText, scheduleByPeriod, type ProfessionalRow } from "@/lib/clinic-settings";
-import { currentMe, listRoles } from "@/lib/roles";
+import { currentMe, listTeam } from "@/lib/roles";
 import { calendarId } from "@/lib/agenda";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
-import { createCalendarFor, createProfessional, deleteProfessional, deleteService, restoreDefaults, saveInsurance, saveService, setRole, updateProfessional } from "@/app/actions";
+import { createCalendarFor, createProfessional, deleteProfessional, deleteService, restoreDefaults, saveInsurance, saveService, updateProfessional } from "@/app/actions";
+import { createTeamUser, deleteTeamUser, updateTeamUser } from "@/app/team-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,9 @@ const OK: Record<string, string> = {
   "servico-novo": "Serviço cadastrado.",
   "servico-removido": "Serviço removido.",
   papel: "Acesso atualizado.",
+  "usuario-criado": "Usuário criado. Ele já pode entrar com o e-mail e a senha definidos.",
+  "usuario-senha": "Senha e acesso atualizados.",
+  "usuario-removido": "Usuário excluído.",
   "insurance-padrao": "Convênios voltaram ao padrão.",
   "prices-padrao": "Preços voltaram ao padrão.",
   "professionals-padrao": "Grades voltaram ao padrão.",
@@ -53,7 +57,7 @@ function ScheduleFields({ p, disabled }: { p?: ProfessionalRow; disabled?: boole
 
 export default async function Configuracoes({ searchParams }: { searchParams: Promise<{ ok?: string; erro?: string; aviso?: string }> }) {
   const { ok, erro, aviso } = await searchParams;
-  const [cfg, me, roles] = await Promise.all([getClinicSettings(), currentMe(), listRoles()]);
+  const [cfg, me, team] = await Promise.all([getClinicSettings(), currentMe(), listTeam()]);
   const edit = me.role === "gestor";
   const tablesOk = cfg.tables.professionals && cfg.tables.services;
   const lock = !edit || !tablesOk;
@@ -221,28 +225,53 @@ export default async function Configuracoes({ searchParams }: { searchParams: Pr
       {edit && (
         <section className="card p-5">
           <h2 className="mb-1 text-sm font-semibold">Equipe e permissões</h2>
-          <p className="mb-3 max-w-2xl text-xs text-muted">
-            Gestor cadastra e edita; recepção só visualiza. Para uma pessoa nova entrar, crie o usuário dela em Supabase › Authentication › Users e depois defina o papel aqui. E-mail sem papel entra como recepção.
+          <p className="mb-4 max-w-2xl text-xs text-muted">
+            Gestor cadastra e edita; recepção só visualiza. Crie o usuário aqui já com a senha (mínimo 8 caracteres) e passe o e-mail e a senha para a pessoa. Você também pode trocar o papel, redefinir a senha ou excluir.
           </p>
-          <ul className="mb-4 divide-y divide-line text-sm">
-            {roles.length === 0 && <li className="py-2 text-muted">Nenhum papel cadastrado (migração 006 pendente).</li>}
-            {roles.map((r) => (
-              <li key={r.email} className="flex items-center justify-between gap-3 py-2">
-                <span>{r.email}</span>
-                <span className={`chip ${r.role === "gestor" ? "bg-brand-soft text-brand" : "bg-slate-100 text-slate-700"}`}>{r.role === "gestor" ? "Gestor" : "Recepção"}</span>
-              </li>
-            ))}
+
+          <ul className="mb-5 divide-y divide-line text-sm">
+            {team.length === 0 && <li className="py-2 text-muted">Nenhum usuário encontrado.</li>}
+            {team.map((m) => {
+              const mine = m.email === me.email;
+              return (
+                <li key={m.email} className="py-3">
+                  <form className="flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="email" value={m.email} />
+                    <div className="min-w-48 flex-1">
+                      <div className="font-medium">{m.email}{mine && <span className="ml-2 text-xs font-normal text-muted">(você)</span>}</div>
+                      <div className="text-xs text-muted">{m.lastSignIn ? `Último acesso: ${new Date(m.lastSignIn).toLocaleDateString("pt-BR", { timeZone: "America/Fortaleza" })}` : "Ainda não entrou"}{!m.hasRole && " · sem papel definido (entra como recepção)"}</div>
+                    </div>
+                    <label className="block text-xs text-muted">Papel
+                      <select name="role" defaultValue={m.role} className={`${input} mt-1`}>
+                        <option value="recepcao">Recepção (só visualiza)</option>
+                        <option value="gestor">Gestor (edita tudo)</option>
+                      </select>
+                    </label>
+                    <label className="block text-xs text-muted">Nova senha (opcional)
+                      <input name="password" type="text" minLength={8} autoComplete="off" placeholder="deixe vazio para manter" className={`${input} mt-1 w-48`} />
+                    </label>
+                    <button formAction={updateTeamUser} className="btn btn-primary">Salvar</button>
+                    {!mine && <ConfirmSubmit formAction={deleteTeamUser} message={`Excluir o usuário ${m.email}? Ele perde o acesso ao sistema.`} className="btn text-bad">Excluir</ConfirmSubmit>}
+                  </form>
+                </li>
+              );
+            })}
           </ul>
-          <form action={setRole} className="flex flex-wrap items-end gap-2">
-            <label className="block text-xs text-muted">E-mail<input name="email" type="email" required placeholder="pessoa@exemplo.com" className={`${input} mt-1 w-64`} /></label>
-            <label className="block text-xs text-muted">Papel
-              <select name="role" className={`${input} mt-1`}>
-                <option value="recepcao">Recepção (só visualiza)</option>
-                <option value="gestor">Gestor (edita tudo)</option>
-              </select>
-            </label>
-            <button className="btn btn-primary">Definir acesso</button>
-          </form>
+
+          <details className="rounded-lg border border-line p-4" open={team.length === 0}>
+            <summary className="cursor-pointer text-sm font-medium text-brand">+ Criar novo usuário</summary>
+            <form action={createTeamUser} className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="block text-xs text-muted">E-mail<input name="email" type="email" required placeholder="pessoa@exemplo.com" className={`${input} mt-1 w-64`} /></label>
+              <label className="block text-xs text-muted">Senha (mín. 8)<input name="password" type="text" required minLength={8} autoComplete="off" className={`${input} mt-1 w-48`} /></label>
+              <label className="block text-xs text-muted">Papel
+                <select name="role" className={`${input} mt-1`}>
+                  <option value="recepcao">Recepção (só visualiza)</option>
+                  <option value="gestor">Gestor (edita tudo)</option>
+                </select>
+              </label>
+              <button className="btn btn-primary">Criar usuário</button>
+            </form>
+          </details>
         </section>
       )}
     </div>
